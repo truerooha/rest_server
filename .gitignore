@@ -1,0 +1,21 @@
+# Зависимости
+node_modules/
+
+# Build
+dist/
+build/
+
+# База данных
+*.db
+*.sqlite*
+
+# Environment
+.env
+.env.local
+
+# Логи
+*.log
+logs/
+
+# Системные файлы
+.DS_Store
