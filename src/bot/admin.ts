@@ -698,8 +698,8 @@ export function createBot(
       // Подтверждение удаления всех данных
       else if (data === 'confirm_clearall') {
         try {
-          // Удаляем все данные из всех таблиц
-          db.prepare('DELETE FROM order_items').run()
+          // Удаляем все данные из всех таблиц (в правильном порядке из-за foreign keys)
+          // Сначала удаляем зависимые таблицы, потом основные
           db.prepare('DELETE FROM orders').run()
           db.prepare('DELETE FROM menu_items').run()
           db.prepare('DELETE FROM restaurant_buildings').run()
