@@ -4,6 +4,16 @@ import { VisionService } from '../services/vision'
 import { MENU_CATEGORIES_ORDER, detectCategory, isBreakfastDish } from '../db/constants'
 import Database from 'better-sqlite3'
 
+// Функция для экранирования HTML спецсимволов
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 // Типы для управления состоянием диалогов
 type ConversationStep = 'name' | 'price' | 'description' | 'category'
 type EditField = 'name' | 'price' | 'description' | 'category'
@@ -839,13 +849,13 @@ export function createBot(
 
       for (const [category, categoryItems] of Object.entries(itemsByCategory)) {
         const emoji = categoryEmojis[category] || '🍽️'
-        message += `${emoji} <b>${category}</b> (${categoryItems.length})\n`
+        message += `${emoji} <b>${escapeHtml(category)}</b> (${categoryItems.length})\n`
         
         for (const item of categoryItems) {
           const breakfastMark = item.is_breakfast ? ' 🌅' : ''
-          message += `• ${item.name}${breakfastMark} — ${item.price}₽\n`
+          message += `• ${escapeHtml(item.name)}${breakfastMark} — ${item.price}₽\n`
           if (item.description) {
-            message += `  <i>${item.description}</i>\n`
+            message += `  <i>${escapeHtml(item.description)}</i>\n`
           }
         }
         message += '\n'
@@ -903,7 +913,7 @@ export function createBot(
         const avgPrice = Math.round(items.reduce((sum, item) => sum + item.price, 0) / items.length)
         const emoji = categoryEmojis[category] || '🍽️'
         
-        message += `${emoji} <b>${category}</b>\n`
+        message += `${emoji} <b>${escapeHtml(category)}</b>\n`
         message += `   Блюд: ${items.length}\n`
         message += `   Средняя цена: ${avgPrice}₽\n\n`
       }
@@ -944,12 +954,12 @@ export function createBot(
       let message = '🌅 <b>Завтраки</b>\n\n'
       
       for (const item of breakfasts) {
-        message += `• ${item.name} — ${item.price}₽\n`
+        message += `• ${escapeHtml(item.name)} — ${item.price}₽\n`
         if (item.description) {
-          message += `  <i>${item.description}</i>\n`
+          message += `  <i>${escapeHtml(item.description)}</i>\n`
         }
         if (item.category) {
-          message += `  📂 ${item.category}\n`
+          message += `  📂 ${escapeHtml(item.category)}\n`
         }
         message += '\n'
       }
