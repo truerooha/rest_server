@@ -784,19 +784,29 @@ export function createBot(
   // Команда /menu - показать текущее меню
   bot.command('menu', async (ctx: Context) => {
     try {
+      console.log('📋 Команда /menu получена')
+      
       const chatId = ctx.chat?.id
       if (!chatId) {
+        console.log('❌ Chat ID не определён')
         await ctx.reply('❌ Не удалось определить chat ID')
         return
       }
+      
+      console.log(`📋 Chat ID: ${chatId}`)
 
       const restaurant = restaurantRepo.findByChatId(chatId)
       if (!restaurant) {
+        console.log('⚠️  Ресторан не найден для chat ID:', chatId)
         await ctx.reply('У вас ещё нет меню. Отправьте фото меню для распознавания!')
         return
       }
+      
+      console.log(`📋 Ресторан найден: ${restaurant.name} (ID: ${restaurant.id})`)
 
       const items = menuRepo.findByRestaurantId(restaurant.id)
+      console.log(`📋 Найдено блюд: ${items.length}`)
+      
       if (items.length === 0) {
         await ctx.reply('Меню пусто. Отправьте фото меню!')
         return
@@ -844,9 +854,11 @@ export function createBot(
       message += `<i>Всего блюд: ${items.length}</i>\n`
       message += `<i>Завтраков: ${items.filter(i => i.is_breakfast).length}</i>`
 
+      console.log(`📋 Отправляю меню (длина: ${message.length} символов)`)
       await ctx.reply(message, { parse_mode: 'HTML' })
+      console.log('✅ Меню отправлено успешно')
     } catch (error) {
-      console.error('Ошибка в команде /menu:', error)
+      console.error('❌ Ошибка в команде /menu:', error)
       await ctx.reply('❌ Произошла ошибка при формировании меню. Попробуйте ещё раз.')
     }
   })
