@@ -3,6 +3,9 @@ import Database from 'better-sqlite3'
 export function initDatabase(dbPath: string): Database.Database {
   const db = new Database(dbPath)
   
+  // Включаем WAL режим для лучшей производительности и конкурентности
+  db.pragma('journal_mode = WAL')
+  
   // Создаём таблицу ресторанов
   db.exec(`
     CREATE TABLE IF NOT EXISTS restaurants (

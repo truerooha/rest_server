@@ -558,14 +558,30 @@ export function createBot(
       // Подтверждение удаления всех данных
       else if (data === 'confirm_clearall') {
         try {
-          // Удаляем все данные из всех таблиц (в правильном порядке из-за foreign keys)
-          // Сначала удаляем зависимые таблицы, потом основные
-          db.prepare('DELETE FROM orders').run()
-          db.prepare('DELETE FROM menu_items').run()
-          db.prepare('DELETE FROM restaurant_buildings').run()
-          db.prepare('DELETE FROM users').run()
-          db.prepare('DELETE FROM buildings').run()
-          db.prepare('DELETE FROM restaurants').run()
+          // Оборачиваем в транзакцию
+          const deleteTransaction = db.transaction(() => {
+            // Игнорируем ошибки отсутствия таблиц (если миграция не прошла)
+            const safeDelete = (table: string) => {
+              try {
+                db.prepare(`DELETE FROM ${table}`).run()
+              } catch (e) {
+                // Игнорируем ошибку "no such table", но пробрасываем остальные
+                if (e instanceof Error && !e.message.includes('no such table')) {
+                  throw e
+                }
+              }
+            }
+
+            // Удаляем данные в правильном порядке
+            safeDelete('orders')
+            safeDelete('menu_items')
+            safeDelete('restaurant_buildings')
+            safeDelete('users')
+            safeDelete('buildings')
+            safeDelete('restaurants')
+          })
+
+          deleteTransaction()
 
           await ctx.editMessageText(
             '✅ <b>Все данные удалены</b>\n\n' +
@@ -577,7 +593,11 @@ export function createBot(
           await ctx.answerCallbackQuery('Все данные удалены!')
         } catch (error) {
           console.error('Ошибка при очистке базы:', error)
-          await ctx.editMessageText('❌ Произошла ошибка при удалении данных')
+          // Отправляем пользователю детали ошибки для отладки
+          await ctx.editMessageText(
+            `❌ Произошла ошибка при удалении данных:\n\n<code>${error instanceof Error ? error.message : String(error)}</code>`,
+            { parse_mode: 'HTML' }
+          )
           await ctx.answerCallbackQuery('Ошибка!')
         }
       }
