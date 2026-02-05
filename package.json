@@ -19,7 +19,8 @@
     "test:coverage": "vitest run --coverage",
     "register-commands": "tsx src/scripts/register-commands.ts",
     "test-bot-commands": "tsx src/scripts/test-bot-commands.ts",
-    "check-database": "tsx src/scripts/check-database.ts"
+    "check-database": "tsx src/scripts/check-database.ts",
+    "seed-default-data": "tsx src/scripts/seed-default-data.ts"
   },
   "keywords": [],
   "author": "",

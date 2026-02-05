@@ -1,6 +1,6 @@
 import { Bot, Context, InlineKeyboard } from 'grammy'
 import Database from 'better-sqlite3'
-import { UserRepository } from '../db/repository'
+import { UserRepository, BuildingRepository } from '../db/repository'
 
 /**
  * Создаёт клиентского бота для заказа обедов
@@ -9,6 +9,7 @@ import { UserRepository } from '../db/repository'
 export function createClientBot(token: string, db: Database.Database, miniAppUrl: string): Bot {
   const bot = new Bot(token)
   const userRepo = new UserRepository(db)
+  const buildingRepo = new BuildingRepository(db)
 
   // Команда /start
   bot.command('start', async (ctx: Context) => {
@@ -19,13 +20,23 @@ export function createClientBot(token: string, db: Database.Database, miniAppUrl
       return
     }
 
-    // Создаём или находим пользователя в БД
-    userRepo.findOrCreate({
+    // Получаем дефолтное здание "Коворкинг"
+    const buildings = buildingRepo.findAll()
+    const defaultBuilding = buildings.find(b => b.name === 'Коворкинг') || buildings[0]
+
+    // Создаём или находим пользователя в БД с привязкой к дефолтному зданию
+    const user = userRepo.findOrCreate({
       telegram_user_id: telegramUser.id,
       username: telegramUser.username,
       first_name: telegramUser.first_name,
       last_name: telegramUser.last_name,
+      building_id: defaultBuilding?.id,
     })
+    
+    // Если у пользователя нет здания, привязываем к дефолтному
+    if (user && !user.building_id && defaultBuilding) {
+      userRepo.updateBuilding(telegramUser.id, defaultBuilding.id)
+    }
 
     // Создаём клавиатуру с кнопкой для запуска Mini App
     const keyboard = new InlineKeyboard().webApp('🍽️ Открыть меню', miniAppUrl)
