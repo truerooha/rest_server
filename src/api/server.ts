@@ -50,6 +50,67 @@ export function createApiServer(db: Database.Database): Express {
     res.json({ status: 'ok', timestamp: new Date().toISOString() })
   })
 
+  // Инициализация дефолтных данных (только для первого запуска)
+  app.post('/api/init-default-data', async (_req: Request, res: Response) => {
+    try {
+      // Проверяем, есть ли уже данные
+      const buildings = context.repos.building.findAll()
+      const coworkingExists = buildings.find(b => b.name === 'Коворкинг')
+
+      if (coworkingExists) {
+        return res.json({
+          success: true,
+          message: 'Дефолтные данные уже существуют',
+          data: { building: coworkingExists },
+        })
+      }
+
+      // Создаём здание "Коворкинг"
+      const coworkingBuilding = context.repos.building.create({
+        name: 'Коворкинг',
+        address: 'Дефолтный адрес коворкинга',
+      })
+
+      // Находим первый ресторан и переименовываем в "Грамм"
+      const restaurants = db.prepare('SELECT * FROM restaurants').all() as any[]
+
+      if (restaurants.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Нет ресторанов. Создайте ресторан через админ-бота сначала.',
+        })
+      }
+
+      const restaurant = restaurants[0]
+
+      // Переименовываем в "Грамм" если нужно
+      if (restaurant.name !== 'Грамм') {
+        db.prepare('UPDATE restaurants SET name = ? WHERE id = ?').run('Грамм', restaurant.id)
+      }
+
+      // Связываем ресторан со зданием
+      const existingLink = db
+        .prepare('SELECT * FROM restaurant_buildings WHERE restaurant_id = ? AND building_id = ?')
+        .get(restaurant.id, coworkingBuilding.id)
+
+      if (!existingLink) {
+        context.repos.restaurantBuilding.link(restaurant.id, coworkingBuilding.id)
+      }
+
+      res.json({
+        success: true,
+        message: 'Дефолтные данные успешно созданы',
+        data: {
+          building: coworkingBuilding,
+          restaurant: { id: restaurant.id, name: 'Грамм' },
+        },
+      })
+    } catch (error) {
+      console.error('Error initializing default data:', error)
+      res.status(500).json({ success: false, error: 'Failed to initialize default data' })
+    }
+  })
+
   // === BUILDINGS ENDPOINTS ===
 
   // GET /api/buildings - получить список зданий
