@@ -60,7 +60,10 @@ export function createBot(
 /add - добавить блюдо вручную
 /delete - удалить блюдо
 /stoplist - управление доступностью блюд
-/edit - редактировать блюдо`,
+/edit - редактировать блюдо
+
+**Опасная зона:**
+/clearall - удалить ВСЕ данные из базы`,
       { parse_mode: 'Markdown' }
     )
   })
@@ -691,6 +694,39 @@ export function createBot(
         await ctx.editMessageText('❌ Редактирование отменено')
         await ctx.answerCallbackQuery('Отменено')
       }
+      
+      // Подтверждение удаления всех данных
+      else if (data === 'confirm_clearall') {
+        try {
+          // Удаляем все данные из всех таблиц
+          db.prepare('DELETE FROM order_items').run()
+          db.prepare('DELETE FROM orders').run()
+          db.prepare('DELETE FROM menu_items').run()
+          db.prepare('DELETE FROM restaurant_buildings').run()
+          db.prepare('DELETE FROM users').run()
+          db.prepare('DELETE FROM buildings').run()
+          db.prepare('DELETE FROM restaurants').run()
+
+          await ctx.editMessageText(
+            '✅ <b>Все данные удалены</b>\n\n' +
+            'База данных полностью очищена.\n\n' +
+            'Отправьте фото меню, чтобы начать заново.',
+            { parse_mode: 'HTML' }
+          )
+
+          await ctx.answerCallbackQuery('Все данные удалены!')
+        } catch (error) {
+          console.error('Ошибка при очистке базы:', error)
+          await ctx.editMessageText('❌ Произошла ошибка при удалении данных')
+          await ctx.answerCallbackQuery('Ошибка!')
+        }
+      }
+      
+      // Отмена удаления всех данных
+      else if (data === 'cancel_clearall') {
+        await ctx.editMessageText('✅ Операция отменена. Данные в безопасности.')
+        await ctx.answerCallbackQuery('Отменено')
+      }
     } catch (error) {
       console.error('Ошибка обработки callback:', error)
       await ctx.answerCallbackQuery('Произошла ошибка')
@@ -732,10 +768,10 @@ export function createBot(
       // Обогащаем данные категориями и признаком завтрака
       const enrichedItems = visionService.enrichMenuItems(result.items)
 
-      // Сохраняем или находим ресторан
+      // Сохраняем или находим ресторан (всегда используем "Грамм")
       const restaurant = restaurantRepo.findOrCreateByChatId(
         chatId,
-        ctx.chat.title || 'Мой ресторан'
+        'Грамм'
       )
 
       // Удаляем старое меню (если есть) и сохраняем новое
@@ -974,6 +1010,35 @@ export function createBot(
       console.error('Ошибка в команде /breakfasts:', error)
       await ctx.reply('❌ Произошла ошибка при формировании списка завтраков. Попробуйте ещё раз.')
     }
+  })
+
+  // Команда /clearall - удалить все данные из базы (ОПАСНАЯ ОПЕРАЦИЯ!)
+  bot.command('clearall', async (ctx: Context) => {
+    const chatId = ctx.chat?.id
+    if (!chatId) {
+      await ctx.reply('❌ Не удалось определить chat ID')
+      return
+    }
+
+    const keyboard = new InlineKeyboard()
+      .text('⚠️ ДА, УДАЛИТЬ ВСЁ', 'confirm_clearall')
+      .text('❌ Отмена', 'cancel_clearall')
+
+    await ctx.reply(
+      '🚨 <b>ВНИМАНИЕ! ОПАСНАЯ ОПЕРАЦИЯ!</b>\n\n' +
+      'Вы собираетесь удалить ВСЕ данные из базы:\n' +
+      '• Все блюда из меню\n' +
+      '• Все рестораны\n' +
+      '• Все здания\n' +
+      '• Всех пользователей\n' +
+      '• Все заказы\n\n' +
+      '⚠️ <b>Это действие НЕОБРАТИМО!</b>\n\n' +
+      'Вы уверены?',
+      {
+        parse_mode: 'HTML',
+        reply_markup: keyboard,
+      }
+    )
   })
 
   return bot
