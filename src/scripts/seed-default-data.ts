@@ -40,22 +40,27 @@ async function seedDefaultData() {
 
     // 2. Находим первый ресторан и переименовываем в "Грамм"
     console.log('\n🍽️  Проверка ресторана "Грамм"...')
-    const restaurants = db.prepare('SELECT * FROM restaurants').all() as any[]
+    let restaurants = db.prepare('SELECT * FROM restaurants').all() as any[]
+    let restaurant: any
 
     if (restaurants.length === 0) {
-      console.log('⚠️  Нет ресторанов! Создайте ресторан через админ-бота.')
-      process.exit(1)
-    }
-
-    const restaurant = restaurants[0]
-    
-    // Переименовываем в "Грамм" если нужно
-    if (restaurant.name !== 'Грамм') {
-      db.prepare('UPDATE restaurants SET name = ? WHERE id = ?')
-        .run('Грамм', restaurant.id)
-      console.log(`✅ Ресторан переименован: "${restaurant.name}" → "Грамм"`)
+      console.log('⚠️  Нет ресторанов. Создаём дефолтный ресторан "Грамм"...')
+      const result = restaurantRepo.create({
+        name: 'Грамм',
+        chat_id: 123456789 // Dummy chat ID
+      })
+      restaurant = result
+      console.log(`✅ Создан дефолтный ресторан (ID: ${restaurant.id})`)
     } else {
-      console.log('✅ Ресторан "Грамм" уже существует')
+      restaurant = restaurants[0]
+      // Переименовываем в "Грамм" если нужно
+      if (restaurant.name !== 'Грамм') {
+        db.prepare('UPDATE restaurants SET name = ? WHERE id = ?')
+          .run('Грамм', restaurant.id)
+        console.log(`✅ Ресторан переименован: "${restaurant.name}" → "Грамм"`)
+      } else {
+        console.log('✅ Ресторан "Грамм" уже существует')
+      }
     }
 
     // 3. Связываем ресторан со зданием

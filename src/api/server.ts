@@ -73,19 +73,21 @@ export function createApiServer(db: Database.Database): Express {
 
       // Находим первый ресторан и переименовываем в "Грамм"
       const restaurants = db.prepare('SELECT * FROM restaurants').all() as any[]
+      let restaurant: any
 
       if (restaurants.length === 0) {
-        return res.status(400).json({
-          success: false,
-          error: 'Нет ресторанов. Создайте ресторан через админ-бота сначала.',
+        // Создаём дефолтный ресторан если нет ни одного
+        const result = context.repos.restaurant.create({
+          name: 'Грамм',
+          chat_id: 123456789 // Dummy chat ID
         })
-      }
-
-      const restaurant = restaurants[0]
-
-      // Переименовываем в "Грамм" если нужно
-      if (restaurant.name !== 'Грамм') {
-        db.prepare('UPDATE restaurants SET name = ? WHERE id = ?').run('Грамм', restaurant.id)
+        restaurant = result
+      } else {
+        restaurant = restaurants[0]
+        // Переименовываем в "Грамм" если нужно
+        if (restaurant.name !== 'Грамм') {
+          db.prepare('UPDATE restaurants SET name = ? WHERE id = ?').run('Грамм', restaurant.id)
+        }
       }
 
       // Связываем ресторан со зданием
