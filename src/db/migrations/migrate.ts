@@ -1,6 +1,35 @@
 import Database from 'better-sqlite3'
-import { readFileSync } from 'fs'
+import { readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
+
+/**
+ * Создаёт таблицу для отслеживания миграций
+ */
+function initMigrationsTable(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS migrations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL,
+      applied_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+}
+
+/**
+ * Проверяет, применена ли миграция
+ */
+function isMigrationApplied(db: Database.Database, migrationName: string): boolean {
+  const result = db.prepare('SELECT COUNT(*) as count FROM migrations WHERE name = ?')
+    .get(migrationName) as { count: number }
+  return result.count > 0
+}
+
+/**
+ * Отмечает миграцию как применённую
+ */
+function markMigrationApplied(db: Database.Database, migrationName: string): void {
+  db.prepare('INSERT INTO migrations (name) VALUES (?)').run(migrationName)
+}
 
 /**
  * Применяет миграцию к базе данных
@@ -9,7 +38,7 @@ export function runMigration(db: Database.Database, migrationFile: string): void
   const migrationPath = join(__dirname, migrationFile)
   const migrationSQL = readFileSync(migrationPath, 'utf-8')
   
-  // Разбиваем на отдельные SQL команды и выполняем их
+  // Разбиваем на отдельные SQL команды
   const statements = migrationSQL
     .split(';')
     .map(s => s.trim())
@@ -23,44 +52,50 @@ export function runMigration(db: Database.Database, migrationFile: string): void
         db.exec(statement)
       }
     }
+    markMigrationApplied(db, migrationFile)
   })()
   
   console.log(`✅ Миграция ${migrationFile} применена успешно`)
 }
 
 /**
- * Проверяет, применена ли миграция
- */
-export function checkMigrationApplied(db: Database.Database): boolean {
-  try {
-    const result = db.prepare(`
-      SELECT COUNT(*) as count 
-      FROM pragma_table_info('menu_items') 
-      WHERE name = 'is_breakfast'
-    `).get() as { count: number }
-    
-    return result.count > 0
-  } catch (error) {
-    return false
-  }
-}
-
-/**
  * Основная функция для применения всех миграций
+ * @param dbOrPath - объект Database или путь к файлу БД
  */
-export function applyMigrations(dbPath: string): void {
-  const db = new Database(dbPath)
+export function applyMigrations(dbOrPath: Database.Database | string): void {
+  const shouldClose = typeof dbOrPath === 'string'
+  const db = shouldClose ? new Database(dbOrPath as string) : (dbOrPath as Database.Database)
   
   console.log('🔄 Проверяем необходимость миграций...')
   
-  if (!checkMigrationApplied(db)) {
-    console.log('⚠️  Обнаружена неприменённая миграция')
-    runMigration(db, '001_add_breakfast_and_categories.sql')
-  } else {
-    console.log('✅ Все миграции уже применены')
+  // Инициализируем таблицу миграций
+  initMigrationsTable(db)
+  
+  // Получаем список всех файлов миграций
+  const migrationsDir = __dirname
+  const migrationFiles = readdirSync(migrationsDir)
+    .filter(f => f.endsWith('.sql'))
+    .sort() // Сортируем по имени (001_, 002_, и т.д.)
+  
+  let appliedCount = 0
+  
+  for (const migrationFile of migrationFiles) {
+    if (!isMigrationApplied(db, migrationFile)) {
+      console.log(`⚠️  Обнаружена неприменённая миграция: ${migrationFile}`)
+      runMigration(db, migrationFile)
+      appliedCount++
+    }
   }
   
-  db.close()
+  if (appliedCount === 0) {
+    console.log('✅ Все миграции уже применены')
+  } else {
+    console.log(`✅ Применено миграций: ${appliedCount}`)
+  }
+  
+  if (shouldClose) {
+    db.close()
+  }
 }
 
 // Если запускается напрямую
