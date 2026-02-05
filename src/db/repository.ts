@@ -25,6 +25,19 @@ export class RestaurantRepository {
     }
   }
 
+  create(restaurant: Omit<Restaurant, 'id' | 'created_at'>): Restaurant {
+    const result = this.db
+      .prepare('INSERT INTO restaurants (name, chat_id) VALUES (?, ?)')
+      .run(restaurant.name, restaurant.chat_id)
+
+    return {
+      id: result.lastInsertRowid as number,
+      name: restaurant.name,
+      chat_id: restaurant.chat_id,
+      created_at: new Date().toISOString(),
+    }
+  }
+
   findByChatId(chatId: number): Restaurant | undefined {
     return this.db
       .prepare('SELECT * FROM restaurants WHERE chat_id = ?')
