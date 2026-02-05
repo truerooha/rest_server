@@ -1,6 +1,6 @@
 import { config } from './utils/config'
 import { initDatabase } from './db/schema'
-import { DeepSeekService } from './services/deepseek'
+import { VisionService } from './services/vision'
 import { createBot } from './bot'
 
 async function main() {
@@ -9,11 +9,11 @@ async function main() {
   // Инициализируем базу данных
   const db = initDatabase(config.databasePath)
 
-  // Создаём сервис DeepSeek
-  const deepseekService = new DeepSeekService(config.deepseekApiKey!)
+  // Создаём сервис GPT-4 Vision
+  const visionService = new VisionService(config.openaiApiKey!)
 
   // Создаём и запускаем бота
-  const bot = createBot(config.botToken!, db, deepseekService)
+  const bot = createBot(config.botToken!, db, visionService)
 
   // Обработка ошибок
   bot.catch((err) => {

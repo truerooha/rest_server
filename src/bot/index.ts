@@ -1,12 +1,12 @@
 import { Bot, Context } from 'grammy'
 import { RestaurantRepository, MenuRepository } from '../db/repository'
-import { DeepSeekService } from '../services/deepseek'
+import { VisionService } from '../services/vision'
 import Database from 'better-sqlite3'
 
 export function createBot(
   token: string,
   db: Database.Database,
-  deepseekService: DeepSeekService
+  visionService: VisionService
 ) {
   const bot = new Bot(token)
   const restaurantRepo = new RestaurantRepository(db)
@@ -32,7 +32,7 @@ export function createBot(
         return
       }
 
-      await ctx.reply('⏳ Распознаю меню... Это займёт 10-20 секунд.')
+      await ctx.reply('⏳ Распознаю меню через GPT-4 Vision... Это займёт 10-20 секунд.')
 
       // Получаем файл с наибольшим разрешением
       const photos = ctx.message?.photo
@@ -45,8 +45,8 @@ export function createBot(
       const file = await ctx.api.getFile(photo.file_id)
       const fileUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`
 
-      // Распознаём меню через DeepSeek
-      const result = await deepseekService.recognizeMenuFromImage(fileUrl)
+      // Распознаём меню через GPT-4 Vision
+      const result = await visionService.recognizeMenuFromImage(fileUrl)
 
       if (result.items.length === 0) {
         await ctx.reply(
