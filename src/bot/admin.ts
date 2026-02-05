@@ -260,146 +260,6 @@ export function createBot(
     })
   })
 
-  // Обработка текстовых сообщений для диалогов
-  bot.on('message:text', async (ctx: Context) => {
-    const chatId = ctx.chat?.id
-    const text = ctx.message?.text
-
-    if (!chatId || !text) return
-
-    // Проверяем, есть ли активный диалог
-    const state = userStates.get(chatId)
-    if (!state) return // Нет активного диалога, пропускаем
-
-    try {
-      // Редактирование существующего блюда
-      if (state.action === 'edit' && state.editItemId && state.editField) {
-        const item = menuRepo.findById(state.editItemId)
-        if (!item) {
-          await ctx.reply('❌ Блюдо не найдено')
-          userStates.delete(chatId)
-          return
-        }
-
-        if (state.editField === 'name') {
-          menuRepo.updateItem(state.editItemId, { name: text.trim() })
-          await ctx.reply(
-            `✅ Название изменено!\n\n` +
-            `📋 Новое название: **${text.trim()}**\n\n` +
-            `/menu - посмотреть меню\n` +
-            `/edit - редактировать ещё`,
-            { parse_mode: 'Markdown' }
-          )
-        } else if (state.editField === 'price') {
-          const price = parseFloat(text.replace(',', '.'))
-          if (isNaN(price) || price <= 0) {
-            await ctx.reply('❌ Неверный формат цены. Введите число больше 0')
-            return
-          }
-          menuRepo.updateItem(state.editItemId, { price })
-          await ctx.reply(
-            `✅ Цена изменена!\n\n` +
-            `📋 ${item.name}\n` +
-            `💰 Новая цена: **${price}₽**\n\n` +
-            `/menu - посмотреть меню\n` +
-            `/edit - редактировать ещё`,
-            { parse_mode: 'Markdown' }
-          )
-        } else if (state.editField === 'description') {
-          const description = text.trim() === '-' ? null : text.trim()
-          menuRepo.updateItem(state.editItemId, { description: description || undefined })
-          await ctx.reply(
-            `✅ Описание изменено!\n\n` +
-            `📋 ${item.name}\n` +
-            `📄 ${description || '_Описание удалено_'}\n\n` +
-            `/menu - посмотреть меню\n` +
-            `/edit - редактировать ещё`,
-            { parse_mode: 'Markdown' }
-          )
-        }
-
-        userStates.delete(chatId)
-        return
-      }
-
-      // Добавление нового блюда
-      if (state.action === 'add') {
-        if (state.step === 'name') {
-          // Сохраняем название
-          state.data.name = text.trim()
-          state.step = 'price'
-          
-          await ctx.reply(
-            '💰 Шаг 2/4: Введите цену блюда (только число)\n\n' +
-            `_Блюдо: ${state.data.name}_\n` +
-            '_Для отмены отправьте /cancel_',
-            { parse_mode: 'Markdown' }
-          )
-          
-        } else if (state.step === 'price') {
-          // Валидация и сохранение цены
-          const price = parseFloat(text.replace(',', '.'))
-          
-          if (isNaN(price) || price <= 0) {
-            await ctx.reply('❌ Неверный формат цены. Введите число больше 0')
-            return
-          }
-          
-          state.data.price = price
-          state.step = 'description'
-          
-          await ctx.reply(
-            '📄 Шаг 3/4: Введите описание блюда\n\n' +
-            `_Блюдо: ${state.data.name} — ${price}₽_\n\n` +
-            '_Отправьте "-" если описание не нужно_\n' +
-            '_Для отмены отправьте /cancel_',
-            { parse_mode: 'Markdown' }
-          )
-          
-        } else if (state.step === 'description') {
-          // Сохраняем описание
-          state.data.description = text.trim() === '-' ? undefined : text.trim()
-          state.step = 'category'
-          
-          // Пытаемся автоматически определить категорию
-          const autoCategory = detectCategory(state.data.name!)
-          
-          // Создаём клавиатуру с категориями
-          const keyboard = new InlineKeyboard()
-          
-          MENU_CATEGORIES_ORDER.forEach((category, index) => {
-            const isAuto = category === autoCategory
-            const label = isAuto ? `✨ ${category}` : category
-            keyboard.text(label, `category:${category}`)
-            
-            // По 2 кнопки в ряд
-            if (index % 2 === 1) keyboard.row()
-          })
-          
-          let message = '🗂️ Шаг 4/4: Выберите категорию блюда\n\n' +
-            `_Блюдо: ${state.data.name} — ${state.data.price}₽_\n`
-          
-          if (state.data.description) {
-            message += `_${state.data.description}_\n\n`
-          }
-          
-          if (autoCategory) {
-            message += `✨ Рекомендуемая категория: **${autoCategory}**\n\n`
-          }
-          
-          await ctx.reply(message, {
-            parse_mode: 'Markdown',
-            reply_markup: keyboard,
-          })
-        }
-      }
-    } catch (error) {
-      console.error('Ошибка обработки диалога:', error)
-      await ctx.reply('❌ Произошла ошибка. Попробуйте снова с /add')
-      userStates.delete(chatId)
-    }
-  })
-
   // Обработка callback queries (нажатия на inline кнопки)
   bot.on('callback_query:data', async (ctx) => {
     const chatId = ctx.chat?.id
@@ -1039,6 +899,146 @@ export function createBot(
         reply_markup: keyboard,
       }
     )
+  })
+
+  // Обработка текстовых сообщений для диалогов
+  bot.on('message:text', async (ctx: Context) => {
+    const chatId = ctx.chat?.id
+    const text = ctx.message?.text
+
+    if (!chatId || !text) return
+
+    // Проверяем, есть ли активный диалог
+    const state = userStates.get(chatId)
+    if (!state) return // Нет активного диалога, пропускаем
+
+    try {
+      // Редактирование существующего блюда
+      if (state.action === 'edit' && state.editItemId && state.editField) {
+        const item = menuRepo.findById(state.editItemId)
+        if (!item) {
+          await ctx.reply('❌ Блюдо не найдено')
+          userStates.delete(chatId)
+          return
+        }
+
+        if (state.editField === 'name') {
+          menuRepo.updateItem(state.editItemId, { name: text.trim() })
+          await ctx.reply(
+            `✅ Название изменено!\n\n` +
+            `📋 Новое название: **${text.trim()}**\n\n` +
+            `/menu - посмотреть меню\n` +
+            `/edit - редактировать ещё`,
+            { parse_mode: 'Markdown' }
+          )
+        } else if (state.editField === 'price') {
+          const price = parseFloat(text.replace(',', '.'))
+          if (isNaN(price) || price <= 0) {
+            await ctx.reply('❌ Неверный формат цены. Введите число больше 0')
+            return
+          }
+          menuRepo.updateItem(state.editItemId, { price })
+          await ctx.reply(
+            `✅ Цена изменена!\n\n` +
+            `📋 ${item.name}\n` +
+            `💰 Новая цена: **${price}₽**\n\n` +
+            `/menu - посмотреть меню\n` +
+            `/edit - редактировать ещё`,
+            { parse_mode: 'Markdown' }
+          )
+        } else if (state.editField === 'description') {
+          const description = text.trim() === '-' ? null : text.trim()
+          menuRepo.updateItem(state.editItemId, { description: description || undefined })
+          await ctx.reply(
+            `✅ Описание изменено!\n\n` +
+            `📋 ${item.name}\n` +
+            `📄 ${description || '_Описание удалено_'}\n\n` +
+            `/menu - посмотреть меню\n` +
+            `/edit - редактировать ещё`,
+            { parse_mode: 'Markdown' }
+          )
+        }
+
+        userStates.delete(chatId)
+        return
+      }
+
+      // Добавление нового блюда
+      if (state.action === 'add') {
+        if (state.step === 'name') {
+          // Сохраняем название
+          state.data.name = text.trim()
+          state.step = 'price'
+          
+          await ctx.reply(
+            '💰 Шаг 2/4: Введите цену блюда (только число)\n\n' +
+            `_Блюдо: ${state.data.name}_\n` +
+            '_Для отмены отправьте /cancel_',
+            { parse_mode: 'Markdown' }
+          )
+          
+        } else if (state.step === 'price') {
+          // Валидация и сохранение цены
+          const price = parseFloat(text.replace(',', '.'))
+          
+          if (isNaN(price) || price <= 0) {
+            await ctx.reply('❌ Неверный формат цены. Введите число больше 0')
+            return
+          }
+          
+          state.data.price = price
+          state.step = 'description'
+          
+          await ctx.reply(
+            '📄 Шаг 3/4: Введите описание блюда\n\n' +
+            `_Блюдо: ${state.data.name} — ${price}₽_\n\n` +
+            '_Отправьте "-" если описание не нужно_\n' +
+            '_Для отмены отправьте /cancel_',
+            { parse_mode: 'Markdown' }
+          )
+          
+        } else if (state.step === 'description') {
+          // Сохраняем описание
+          state.data.description = text.trim() === '-' ? undefined : text.trim()
+          state.step = 'category'
+          
+          // Пытаемся автоматически определить категорию
+          const autoCategory = detectCategory(state.data.name!)
+          
+          // Создаём клавиатуру с категориями
+          const keyboard = new InlineKeyboard()
+          
+          MENU_CATEGORIES_ORDER.forEach((category, index) => {
+            const isAuto = category === autoCategory
+            const label = isAuto ? `✨ ${category}` : category
+            keyboard.text(label, `category:${category}`)
+            
+            // По 2 кнопки в ряд
+            if (index % 2 === 1) keyboard.row()
+          })
+          
+          let message = '🗂️ Шаг 4/4: Выберите категорию блюда\n\n' +
+            `_Блюдо: ${state.data.name} — ${state.data.price}₽_\n`
+          
+          if (state.data.description) {
+            message += `_${state.data.description}_\n\n`
+          }
+          
+          if (autoCategory) {
+            message += `✨ Рекомендуемая категория: **${autoCategory}**\n\n`
+          }
+          
+          await ctx.reply(message, {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard,
+          })
+        }
+      }
+    } catch (error) {
+      console.error('Ошибка обработки диалога:', error)
+      await ctx.reply('❌ Произошла ошибка. Попробуйте снова с /add')
+      userStates.delete(chatId)
+    }
   })
 
   return bot
