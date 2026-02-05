@@ -696,7 +696,7 @@ export function createBot(
         return
       }
 
-      await ctx.reply('⏳ Распознаю меню через GPT-4 Vision... Это займёт 10-20 секунд.')
+      await ctx.reply('⏳ Распознаю меню... Это займёт 10-20 секунд.')
 
       // Получаем файл с наибольшим разрешением
       const photos = ctx.message?.photo
@@ -783,160 +783,175 @@ export function createBot(
 
   // Команда /menu - показать текущее меню
   bot.command('menu', async (ctx: Context) => {
-    const chatId = ctx.chat?.id
-    if (!chatId) {
-      await ctx.reply('❌ Не удалось определить chat ID')
-      return
-    }
-
-    const restaurant = restaurantRepo.findByChatId(chatId)
-    if (!restaurant) {
-      await ctx.reply('У вас ещё нет меню. Отправьте фото меню для распознавания!')
-      return
-    }
-
-    const items = menuRepo.findByRestaurantId(restaurant.id)
-    if (items.length === 0) {
-      await ctx.reply('Меню пусто. Отправьте фото меню!')
-      return
-    }
-
-    // Группируем по категориям
-    const itemsByCategory = items.reduce((acc, item) => {
-      const category = item.category || 'Другое'
-      if (!acc[category]) {
-        acc[category] = []
+    try {
+      const chatId = ctx.chat?.id
+      if (!chatId) {
+        await ctx.reply('❌ Не удалось определить chat ID')
+        return
       }
-      acc[category].push(item)
-      return acc
-    }, {} as Record<string, typeof items>)
 
-    // Формируем красивое меню с категориями
-    let message = '📋 **Ваше меню**\n\n'
-    
-    const categoryEmojis: Record<string, string> = {
-      'Завтраки': '🌅',
-      'Закуски': '🍞',
-      'Салаты': '🥗',
-      'Супы': '🍲',
-      'Пицца': '🍕',
-      'Паста': '🍝',
-      'Ризотто': '🍚',
-      'Горячие блюда': '🥩',
-      'Десерты': '🍰'
-    }
+      const restaurant = restaurantRepo.findByChatId(chatId)
+      if (!restaurant) {
+        await ctx.reply('У вас ещё нет меню. Отправьте фото меню для распознавания!')
+        return
+      }
 
-    for (const [category, categoryItems] of Object.entries(itemsByCategory)) {
-      const emoji = categoryEmojis[category] || '🍽️'
-      message += `${emoji} **${category}** (${categoryItems.length})\n`
-      
-      for (const item of categoryItems) {
-        const breakfastMark = item.is_breakfast ? ' 🌅' : ''
-        message += `• ${item.name}${breakfastMark} — ${item.price}₽\n`
-        if (item.description) {
-          message += `  _${item.description}_\n`
+      const items = menuRepo.findByRestaurantId(restaurant.id)
+      if (items.length === 0) {
+        await ctx.reply('Меню пусто. Отправьте фото меню!')
+        return
+      }
+
+      // Группируем по категориям
+      const itemsByCategory = items.reduce((acc, item) => {
+        const category = item.category || 'Другое'
+        if (!acc[category]) {
+          acc[category] = []
         }
+        acc[category].push(item)
+        return acc
+      }, {} as Record<string, typeof items>)
+
+      // Формируем красивое меню с категориями
+      let message = '📋 <b>Ваше меню</b>\n\n'
+      
+      const categoryEmojis: Record<string, string> = {
+        'Завтраки': '🌅',
+        'Закуски': '🍞',
+        'Салаты': '🥗',
+        'Супы': '🍲',
+        'Пицца': '🍕',
+        'Паста': '🍝',
+        'Ризотто': '🍚',
+        'Горячие блюда': '🥩',
+        'Десерты': '🍰'
       }
-      message += '\n'
+
+      for (const [category, categoryItems] of Object.entries(itemsByCategory)) {
+        const emoji = categoryEmojis[category] || '🍽️'
+        message += `${emoji} <b>${category}</b> (${categoryItems.length})\n`
+        
+        for (const item of categoryItems) {
+          const breakfastMark = item.is_breakfast ? ' 🌅' : ''
+          message += `• ${item.name}${breakfastMark} — ${item.price}₽\n`
+          if (item.description) {
+            message += `  <i>${item.description}</i>\n`
+          }
+        }
+        message += '\n'
+      }
+
+      message += `<i>Всего блюд: ${items.length}</i>\n`
+      message += `<i>Завтраков: ${items.filter(i => i.is_breakfast).length}</i>`
+
+      await ctx.reply(message, { parse_mode: 'HTML' })
+    } catch (error) {
+      console.error('Ошибка в команде /menu:', error)
+      await ctx.reply('❌ Произошла ошибка при формировании меню. Попробуйте ещё раз.')
     }
-
-    message += `_Всего блюд: ${items.length}_\n`
-    message += `_Завтраков: ${items.filter(i => i.is_breakfast).length}_`
-
-    await ctx.reply(message, { parse_mode: 'Markdown' })
   })
 
   // Команда /categories - статистика по категориям
   bot.command('categories', async (ctx: Context) => {
-    const chatId = ctx.chat?.id
-    if (!chatId) {
-      await ctx.reply('❌ Не удалось определить chat ID')
-      return
+    try {
+      const chatId = ctx.chat?.id
+      if (!chatId) {
+        await ctx.reply('❌ Не удалось определить chat ID')
+        return
+      }
+
+      const restaurant = restaurantRepo.findByChatId(chatId)
+      if (!restaurant) {
+        await ctx.reply('У вас ещё нет меню. Отправьте фото меню!')
+        return
+      }
+
+      const categories = menuRepo.getAllCategories(restaurant.id)
+      if (categories.length === 0) {
+        await ctx.reply('Меню пусто!')
+        return
+      }
+
+      let message = '📊 <b>Статистика по категориям</b>\n\n'
+
+      const categoryEmojis: Record<string, string> = {
+        'Завтраки': '🌅',
+        'Закуски': '🍞',
+        'Салаты': '🥗',
+        'Супы': '🍲',
+        'Пицца': '🍕',
+        'Паста': '🍝',
+        'Ризотто': '🍚',
+        'Горячие блюда': '🥩',
+        'Десерты': '🍰'
+      }
+
+      for (const category of categories) {
+        const items = menuRepo.findByCategoryAndRestaurantId(category, restaurant.id)
+        const avgPrice = Math.round(items.reduce((sum, item) => sum + item.price, 0) / items.length)
+        const emoji = categoryEmojis[category] || '🍽️'
+        
+        message += `${emoji} <b>${category}</b>\n`
+        message += `   Блюд: ${items.length}\n`
+        message += `   Средняя цена: ${avgPrice}₽\n\n`
+      }
+
+      const allItems = menuRepo.findByRestaurantId(restaurant.id)
+      message += `<i>Всего категорий: ${categories.length}</i>\n`
+      message += `<i>Всего блюд: ${allItems.length}</i>`
+
+      await ctx.reply(message, { parse_mode: 'HTML' })
+    } catch (error) {
+      console.error('Ошибка в команде /categories:', error)
+      await ctx.reply('❌ Произошла ошибка при формировании статистики. Попробуйте ещё раз.')
     }
-
-    const restaurant = restaurantRepo.findByChatId(chatId)
-    if (!restaurant) {
-      await ctx.reply('У вас ещё нет меню. Отправьте фото меню!')
-      return
-    }
-
-    const categories = menuRepo.getAllCategories(restaurant.id)
-    if (categories.length === 0) {
-      await ctx.reply('Меню пусто!')
-      return
-    }
-
-    let message = '📊 **Статистика по категориям**\n\n'
-
-    const categoryEmojis: Record<string, string> = {
-      'Завтраки': '🌅',
-      'Закуски': '🍞',
-      'Салаты': '🥗',
-      'Супы': '🍲',
-      'Пицца': '🍕',
-      'Паста': '🍝',
-      'Ризотто': '🍚',
-      'Горячие блюда': '🥩',
-      'Десерты': '🍰'
-    }
-
-    for (const category of categories) {
-      const items = menuRepo.findByCategoryAndRestaurantId(category, restaurant.id)
-      const avgPrice = Math.round(items.reduce((sum, item) => sum + item.price, 0) / items.length)
-      const emoji = categoryEmojis[category] || '🍽️'
-      
-      message += `${emoji} **${category}**\n`
-      message += `   Блюд: ${items.length}\n`
-      message += `   Средняя цена: ${avgPrice}₽\n\n`
-    }
-
-    const allItems = menuRepo.findByRestaurantId(restaurant.id)
-    message += `_Всего категорий: ${categories.length}_\n`
-    message += `_Всего блюд: ${allItems.length}_`
-
-    await ctx.reply(message, { parse_mode: 'Markdown' })
   })
 
   // Команда /breakfasts - показать только завтраки
   bot.command('breakfasts', async (ctx: Context) => {
-    const chatId = ctx.chat?.id
-    if (!chatId) {
-      await ctx.reply('❌ Не удалось определить chat ID')
-      return
-    }
-
-    const restaurant = restaurantRepo.findByChatId(chatId)
-    if (!restaurant) {
-      await ctx.reply('У вас ещё нет меню. Отправьте фото меню!')
-      return
-    }
-
-    const breakfasts = menuRepo.findBreakfastsByRestaurantId(restaurant.id)
-    
-    if (breakfasts.length === 0) {
-      await ctx.reply('В меню нет завтраков 🤷')
-      return
-    }
-
-    let message = '🌅 **Завтраки**\n\n'
-    
-    for (const item of breakfasts) {
-      message += `• ${item.name} — ${item.price}₽\n`
-      if (item.description) {
-        message += `  _${item.description}_\n`
+    try {
+      const chatId = ctx.chat?.id
+      if (!chatId) {
+        await ctx.reply('❌ Не удалось определить chat ID')
+        return
       }
-      if (item.category) {
-        message += `  📂 ${item.category}\n`
+
+      const restaurant = restaurantRepo.findByChatId(chatId)
+      if (!restaurant) {
+        await ctx.reply('У вас ещё нет меню. Отправьте фото меню!')
+        return
       }
-      message += '\n'
+
+      const breakfasts = menuRepo.findBreakfastsByRestaurantId(restaurant.id)
+      
+      if (breakfasts.length === 0) {
+        await ctx.reply('В меню нет завтраков 🤷')
+        return
+      }
+
+      let message = '🌅 <b>Завтраки</b>\n\n'
+      
+      for (const item of breakfasts) {
+        message += `• ${item.name} — ${item.price}₽\n`
+        if (item.description) {
+          message += `  <i>${item.description}</i>\n`
+        }
+        if (item.category) {
+          message += `  📂 ${item.category}\n`
+        }
+        message += '\n'
+      }
+
+      const avgPrice = Math.round(breakfasts.reduce((sum, item) => sum + item.price, 0) / breakfasts.length)
+      message += `<i>Всего завтраков: ${breakfasts.length}</i>\n`
+      message += `<i>Средняя цена: ${avgPrice}₽</i>\n\n`
+      message += '⏰ Рекомендуется доступность до 11:00'
+
+      await ctx.reply(message, { parse_mode: 'HTML' })
+    } catch (error) {
+      console.error('Ошибка в команде /breakfasts:', error)
+      await ctx.reply('❌ Произошла ошибка при формировании списка завтраков. Попробуйте ещё раз.')
     }
-
-    const avgPrice = Math.round(breakfasts.reduce((sum, item) => sum + item.price, 0) / breakfasts.length)
-    message += `_Всего завтраков: ${breakfasts.length}_\n`
-    message += `_Средняя цена: ${avgPrice}₽_\n\n`
-    message += '⏰ Рекомендуется доступность до 11:00'
-
-    await ctx.reply(message, { parse_mode: 'Markdown' })
   })
 
   return bot

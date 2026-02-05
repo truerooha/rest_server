@@ -16,7 +16,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "register-commands": "tsx src/scripts/register-commands.ts",
+    "test-bot-commands": "tsx src/scripts/test-bot-commands.ts",
+    "check-database": "tsx src/scripts/check-database.ts"
   },
   "keywords": [],
   "author": "",
