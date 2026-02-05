@@ -2,7 +2,7 @@
 # Указываем версию Node.js 20+ для совместимости с better-sqlite3@12.6.2
 
 [phases.setup]
-nixPkgs = ["nodejs-20_x"]
+nixPkgs = ["nodejs_20"]
 
 [phases.install]
 cmds = ["npm ci"]
