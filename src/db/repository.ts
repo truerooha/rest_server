@@ -38,8 +38,8 @@ export class MenuRepository {
   createItem(item: Omit<MenuItem, 'id' | 'created_at'>): MenuItem {
     const result = this.db
       .prepare(`
-        INSERT INTO menu_items (restaurant_id, name, price, description, category, is_available)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO menu_items (restaurant_id, name, price, description, category, is_breakfast, is_available)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         item.restaurant_id,
@@ -47,6 +47,7 @@ export class MenuRepository {
         item.price,
         item.description || null,
         item.category || null,
+        item.is_breakfast ? 1 : 0,
         item.is_available ? 1 : 0
       )
 
@@ -61,6 +62,26 @@ export class MenuRepository {
     return this.db
       .prepare('SELECT * FROM menu_items WHERE restaurant_id = ? ORDER BY category, name')
       .all(restaurantId) as MenuItem[]
+  }
+
+  findBreakfastsByRestaurantId(restaurantId: number): MenuItem[] {
+    return this.db
+      .prepare('SELECT * FROM menu_items WHERE restaurant_id = ? AND is_breakfast = 1 ORDER BY name')
+      .all(restaurantId) as MenuItem[]
+  }
+
+  findByCategoryAndRestaurantId(category: string, restaurantId: number): MenuItem[] {
+    return this.db
+      .prepare('SELECT * FROM menu_items WHERE restaurant_id = ? AND category = ? ORDER BY name')
+      .all(restaurantId, category) as MenuItem[]
+  }
+
+  getAllCategories(restaurantId: number): string[] {
+    const result = this.db
+      .prepare('SELECT DISTINCT category FROM menu_items WHERE restaurant_id = ? AND category IS NOT NULL ORDER BY category')
+      .all(restaurantId) as Array<{ category: string }>
+    
+    return result.map(r => r.category)
   }
 
   deleteAllByRestaurantId(restaurantId: number): void {

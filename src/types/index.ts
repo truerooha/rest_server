@@ -14,6 +14,7 @@ export interface MenuItem {
   price: number
   description?: string
   category?: string
+  is_breakfast: boolean
   is_available: boolean
   created_at: string
 }
@@ -23,5 +24,6 @@ export interface MenuRecognitionResult {
     name: string
     price: number
     description?: string
+    category?: string
   }>
 }

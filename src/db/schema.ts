@@ -22,6 +22,7 @@ export function initDatabase(dbPath: string): Database.Database {
       price REAL NOT NULL,
       description TEXT,
       category TEXT,
+      is_breakfast INTEGER DEFAULT 0,
       is_available INTEGER DEFAULT 1,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE
