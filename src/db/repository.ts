@@ -89,4 +89,71 @@ export class MenuRepository {
       .prepare('DELETE FROM menu_items WHERE restaurant_id = ?')
       .run(restaurantId)
   }
+
+  findById(id: number): MenuItem | undefined {
+    return this.db
+      .prepare('SELECT * FROM menu_items WHERE id = ?')
+      .get(id) as MenuItem | undefined
+  }
+
+  updateItem(id: number, updates: Partial<Omit<MenuItem, 'id' | 'created_at' | 'restaurant_id'>>): void {
+    const fields: string[] = []
+    const values: any[] = []
+
+    if (updates.name !== undefined) {
+      fields.push('name = ?')
+      values.push(updates.name)
+    }
+    if (updates.price !== undefined) {
+      fields.push('price = ?')
+      values.push(updates.price)
+    }
+    if (updates.description !== undefined) {
+      fields.push('description = ?')
+      values.push(updates.description)
+    }
+    if (updates.category !== undefined) {
+      fields.push('category = ?')
+      values.push(updates.category)
+    }
+    if (updates.is_breakfast !== undefined) {
+      fields.push('is_breakfast = ?')
+      values.push(updates.is_breakfast ? 1 : 0)
+    }
+    if (updates.is_available !== undefined) {
+      fields.push('is_available = ?')
+      values.push(updates.is_available ? 1 : 0)
+    }
+
+    if (fields.length === 0) return
+
+    values.push(id)
+    this.db
+      .prepare(`UPDATE menu_items SET ${fields.join(', ')} WHERE id = ?`)
+      .run(...values)
+  }
+
+  deleteItem(id: number): void {
+    this.db
+      .prepare('DELETE FROM menu_items WHERE id = ?')
+      .run(id)
+  }
+
+  toggleAvailability(id: number): void {
+    this.db
+      .prepare('UPDATE menu_items SET is_available = NOT is_available WHERE id = ?')
+      .run(id)
+  }
+
+  findAvailableByRestaurantId(restaurantId: number): MenuItem[] {
+    return this.db
+      .prepare('SELECT * FROM menu_items WHERE restaurant_id = ? AND is_available = 1 ORDER BY category, name')
+      .all(restaurantId) as MenuItem[]
+  }
+
+  findUnavailableByRestaurantId(restaurantId: number): MenuItem[] {
+    return this.db
+      .prepare('SELECT * FROM menu_items WHERE restaurant_id = ? AND is_available = 0 ORDER BY category, name')
+      .all(restaurantId) as MenuItem[]
+  }
 }
