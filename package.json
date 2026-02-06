@@ -12,7 +12,7 @@
     "dev:api": "tsx watch src/api-only.ts",
     "start": "node dist/index.js",
     "start:api": "node dist/api-only.js",
-    "build": "tsc",
+    "build": "tsc && cp src/db/migrations/*.sql dist/db/migrations/",
     "migrate": "tsx src/db/migrations/migrate.ts ./database.db",
     "test:migration": "tsx src/db/test-migration.ts",
     "test": "vitest run",
