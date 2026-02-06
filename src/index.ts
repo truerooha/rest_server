@@ -38,11 +38,19 @@ async function main() {
 
   // Запускаем API сервер для Mini App сразу, чтобы Railway видел порт
   const apiServer = createApiServer(db)
-  const server = apiServer.listen(config.apiPort, '0.0.0.0', () => {
-    logger.info('API сервер запущен', { port: config.apiPort, host: '0.0.0.0' })
+  const port = config.apiPort
+  const host = '0.0.0.0'
+  
+  console.log(`Attempting to listen on ${host}:${port}`)
+  
+  const server = apiServer.listen(port, host, () => {
+    console.log(`Server is definitely listening on ${host}:${port}`)
+    logger.info('API сервер запущен', { port, host })
   })
   server.on('error', (error) => {
+    console.error('SERVER FAILED TO START:', error)
     logger.error('Ошибка запуска HTTP сервера', { error })
+    process.exit(1)
   })
 
   // Graceful shutdown
