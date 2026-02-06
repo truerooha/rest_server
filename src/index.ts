@@ -28,6 +28,12 @@ async function main() {
 
   // Инициализируем базу данных
   const db = initDatabase(config.databasePath)
+
+  console.log('Environment Debug:', {
+    PORT: process.env.PORT,
+    API_PORT: process.env.API_PORT,
+    configApiPort: config.apiPort
+  })
   
   // Применяем миграции
   if (config.disableMigrations) {
