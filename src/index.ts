@@ -20,13 +20,21 @@ async function main() {
     railwayEnvironment: process.env.RAILWAY_ENVIRONMENT,
     railwayService: process.env.RAILWAY_SERVICE_NAME,
     corsAllowedOrigins: config.corsAllowedOrigins,
+    disableBots: config.disableBots,
+    disableAdminBot: config.disableAdminBot,
+    disableClientBot: config.disableClientBot,
+    disableMigrations: config.disableMigrations,
   })
 
   // Инициализируем базу данных
   const db = initDatabase(config.databasePath)
   
   // Применяем миграции
-  applyMigrations(config.databasePath)
+  if (config.disableMigrations) {
+    logger.warn('Миграции отключены флагом DISABLE_MIGRATIONS')
+  } else {
+    applyMigrations(config.databasePath)
+  }
 
   // Запускаем API сервер для Mini App сразу, чтобы Railway видел порт
   const apiServer = createApiServer(db)
@@ -63,7 +71,9 @@ async function main() {
   }
 
   // Создаём и запускаем админ-бота (если есть токен и Vision-сервис)
-  if (config.botToken && visionService) {
+  if (config.disableBots || config.disableAdminBot) {
+    logger.warn('Админ-бот отключён флагами конфигурации')
+  } else if (config.botToken && visionService) {
     try {
       logger.info('Запуск админ-бота...')
       const adminBot = createAdminBot(config.botToken, db, visionService)
@@ -86,7 +96,9 @@ async function main() {
   }
 
   // Создаём и запускаем клиентского бота (если токен указан)
-  if (config.clientBotToken) {
+  if (config.disableBots || config.disableClientBot) {
+    logger.warn('Клиентский бот отключён флагами конфигурации')
+  } else if (config.clientBotToken) {
     try {
       logger.info('Запуск клиентского бота...')
       const clientBot = createClientBot(config.clientBotToken, db, config.miniAppUrl)

@@ -16,6 +16,10 @@ const envSchema = z.object({
   MINI_APP_URL: z.string().optional(),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).optional(),
   CORS_ALLOWED_ORIGINS: z.string().optional(),
+  DISABLE_BOTS: z.string().optional(),
+  DISABLE_ADMIN_BOT: z.string().optional(),
+  DISABLE_CLIENT_BOT: z.string().optional(),
+  DISABLE_MIGRATIONS: z.string().optional(),
 })
 
 const parsedEnv = envSchema.safeParse(process.env)
@@ -27,6 +31,15 @@ if (!parsedEnv.success) {
 }
 
 const env = parsedEnv.success ? parsedEnv.data : process.env
+
+const parseBooleanFlag = (value?: string): boolean => {
+  if (!value) {
+    return false
+  }
+
+  const normalized = value.trim().toLowerCase()
+  return ['1', 'true', 'yes', 'on'].includes(normalized)
+}
 
 export const config = {
   botToken: env.BOT_TOKEN,
@@ -41,6 +54,10 @@ export const config = {
   corsAllowedOrigins: env.CORS_ALLOWED_ORIGINS
     ? env.CORS_ALLOWED_ORIGINS.split(',').map((origin) => origin.trim()).filter(Boolean)
     : [],
+  disableBots: parseBooleanFlag(env.DISABLE_BOTS),
+  disableAdminBot: parseBooleanFlag(env.DISABLE_ADMIN_BOT),
+  disableClientBot: parseBooleanFlag(env.DISABLE_CLIENT_BOT),
+  disableMigrations: parseBooleanFlag(env.DISABLE_MIGRATIONS),
 }
 
 // Внимание:

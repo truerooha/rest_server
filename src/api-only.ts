@@ -13,13 +13,18 @@ async function main() {
     railwayEnvironment: process.env.RAILWAY_ENVIRONMENT,
     railwayService: process.env.RAILWAY_SERVICE_NAME,
     corsAllowedOrigins: config.corsAllowedOrigins,
+    disableMigrations: config.disableMigrations,
   })
 
   // Инициализируем базу данных
   const db = initDatabase(config.databasePath)
   
   // Применяем миграции
-  applyMigrations(config.databasePath)
+  if (config.disableMigrations) {
+    logger.warn('Миграции отключены флагом DISABLE_MIGRATIONS')
+  } else {
+    applyMigrations(config.databasePath)
+  }
 
   // Запускаем API сервер для Mini App
   const apiServer = createApiServer(db)
