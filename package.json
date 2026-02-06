@@ -11,6 +11,7 @@
     "dev": "tsx watch src/index.ts",
     "dev:api": "tsx watch src/api-only.ts",
     "start": "node dist/index.js",
+    "start:api": "node dist/api-only.js",
     "build": "tsc",
     "migrate": "tsx src/db/migrations/migrate.ts ./database.db",
     "test:migration": "tsx src/db/test-migration.ts",

@@ -15,46 +15,7 @@ async function main() {
   // Применяем миграции
   applyMigrations(config.databasePath)
 
-  // Создаём сервис GPT-4 Vision (если есть ключ)
-  const visionService = config.openaiApiKey
-    ? new VisionService(config.openaiApiKey)
-    : null
-
-  // Создаём и запускаем админ-бота (если есть токен и Vision-сервис)
-  if (config.botToken && visionService) {
-    try {
-      const adminBot = createAdminBot(config.botToken, db, visionService)
-      adminBot.catch((err) => {
-        console.error('❌ Ошибка в админ-боте:', err)
-      })
-      await adminBot.start()
-      console.log('✅ Админ-бот запущен')
-    } catch (error) {
-      console.error('⚠️  Не удалось запустить админ-бота:', error)
-      console.log('⚠️  Продолжаем запуск без админ-бота (API сервер будет работать)')
-    }
-  } else {
-    console.log('⚠️  BOT_TOKEN или OPENAI_API_KEY не указаны, админ-бот не запущен')
-  }
-
-  // Создаём и запускаем клиентского бота (если токен указан)
-  if (config.clientBotToken) {
-    try {
-      const clientBot = createClientBot(config.clientBotToken, db, config.miniAppUrl)
-      clientBot.catch((err) => {
-        console.error('❌ Ошибка в клиентском боте:', err)
-      })
-      await clientBot.start()
-      console.log('✅ Клиентский бот запущен')
-    } catch (error) {
-      console.error('⚠️  Не удалось запустить клиентского бота:', error)
-      console.log('⚠️  Продолжаем запуск без клиентского бота (API сервер будет работать)')
-    }
-  } else {
-    console.log('⚠️  CLIENT_BOT_TOKEN не указан, клиентский бот не запущен')
-  }
-
-  // Запускаем API сервер для Mini App
+  // Запускаем API сервер для Mini App сразу, чтобы Railway видел порт
   const apiServer = createApiServer(db)
   const server = apiServer.listen(config.apiPort, () => {
     console.log(`✅ API сервер запущен на порту ${config.apiPort}`)
@@ -70,7 +31,55 @@ async function main() {
     })
   })
 
-  console.log('✅ Все сервисы запущены и готовы к работе!')
+  // Создаём сервис GPT-4 Vision (если есть ключ)
+  const visionService = config.openaiApiKey
+    ? new VisionService(config.openaiApiKey)
+    : null
+
+  // Создаём и запускаем админ-бота (если есть токен и Vision-сервис)
+  if (config.botToken && visionService) {
+    try {
+      const adminBot = createAdminBot(config.botToken, db, visionService)
+      adminBot.catch((err) => {
+        console.error('❌ Ошибка в админ-боте:', err)
+      })
+      adminBot.start()
+        .then(() => {
+          console.log('✅ Админ-бот запущен')
+        })
+        .catch((err) => {
+          console.error('❌ Ошибка старта админ-бота:', err)
+        })
+    } catch (error) {
+      console.error('⚠️  Не удалось запустить админ-бота:', error)
+      console.log('⚠️  Продолжаем работу без админ-бота')
+    }
+  } else {
+    console.log('⚠️  BOT_TOKEN или OPENAI_API_KEY не указаны, админ-бот не запущен')
+  }
+
+  // Создаём и запускаем клиентского бота (если токен указан)
+  if (config.clientBotToken) {
+    try {
+      const clientBot = createClientBot(config.clientBotToken, db, config.miniAppUrl)
+      clientBot.catch((err) => {
+        console.error('❌ Ошибка в клиентском боте:', err)
+      })
+      clientBot.start()
+        .then(() => {
+          console.log('✅ Клиентский бот запущен')
+        })
+        .catch((err) => {
+          console.error('❌ Ошибка старта клиентского бота:', err)
+        })
+    } catch (error) {
+      console.error('⚠️  Не удалось запустить клиентского бота:', error)
+      console.log('⚠️  Продолжаем работу без клиентского бота')
+    }
+  } else {
+    console.log('⚠️  CLIENT_BOT_TOKEN не указан, клиентский бот не запущен')
+  }
+  console.log('✅ Все сервисы инициализированы и готовы к работе!')
 }
 
 main().catch((error) => {
