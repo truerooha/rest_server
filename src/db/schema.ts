@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+import { logger } from '../utils/logger'
 
 export function initDatabase(dbPath: string): Database.Database {
   const db = new Database(dbPath)
@@ -32,7 +33,7 @@ export function initDatabase(dbPath: string): Database.Database {
     )
   `)
   
-  console.log('✅ База данных инициализирована')
+  logger.info('База данных инициализирована')
   
   return db
 }

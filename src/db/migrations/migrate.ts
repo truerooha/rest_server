@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3'
 import { readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
+import { logger } from '../../utils/logger'
 
 /**
  * Создаёт таблицу для отслеживания миграций
@@ -44,7 +45,7 @@ export function runMigration(db: Database.Database, migrationFile: string): void
     .map(s => s.trim())
     .filter(s => s.length > 0 && !s.startsWith('--'))
   
-  console.log(`📦 Применяем миграцию: ${migrationFile}`)
+  logger.info('Применяем миграцию', { migrationFile })
   
   db.transaction(() => {
     for (const statement of statements) {
@@ -55,7 +56,7 @@ export function runMigration(db: Database.Database, migrationFile: string): void
     markMigrationApplied(db, migrationFile)
   })()
   
-  console.log(`✅ Миграция ${migrationFile} применена успешно`)
+  logger.info('Миграция применена успешно', { migrationFile })
 }
 
 /**
@@ -66,7 +67,7 @@ export function applyMigrations(dbOrPath: Database.Database | string): void {
   const shouldClose = typeof dbOrPath === 'string'
   const db = shouldClose ? new Database(dbOrPath as string) : (dbOrPath as Database.Database)
   
-  console.log('🔄 Проверяем необходимость миграций...')
+  logger.info('Проверяем необходимость миграций...')
   
   // Инициализируем таблицу миграций
   initMigrationsTable(db)
@@ -81,16 +82,16 @@ export function applyMigrations(dbOrPath: Database.Database | string): void {
   
   for (const migrationFile of migrationFiles) {
     if (!isMigrationApplied(db, migrationFile)) {
-      console.log(`⚠️  Обнаружена неприменённая миграция: ${migrationFile}`)
+      logger.warn('Обнаружена неприменённая миграция', { migrationFile })
       runMigration(db, migrationFile)
       appliedCount++
     }
   }
   
   if (appliedCount === 0) {
-    console.log('✅ Все миграции уже применены')
+    logger.info('Все миграции уже применены')
   } else {
-    console.log(`✅ Применено миграций: ${appliedCount}`)
+    logger.info('Применено миграций', { appliedCount })
   }
   
   if (shouldClose) {

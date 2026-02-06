@@ -5,9 +5,21 @@ import { VisionService } from './services/vision'
 import { createBot as createAdminBot } from './bot/admin'
 import { createClientBot } from './bot/client'
 import { createApiServer } from './api/server'
+import { logger } from './utils/logger'
 
 async function main() {
-  console.log('🚀 Запуск "Обед в Офис"...')
+  logger.info('Запуск сервера "Обед в Офис"', {
+    nodeEnv: config.nodeEnv,
+    apiPort: config.apiPort,
+    databasePath: config.databasePath,
+    miniAppUrl: config.miniAppUrl,
+    hasBotToken: Boolean(config.botToken),
+    hasClientBotToken: Boolean(config.clientBotToken),
+    hasOpenaiApiKey: Boolean(config.openaiApiKey),
+    logLevel: config.logLevel ?? logger.level,
+    railwayEnvironment: process.env.RAILWAY_ENVIRONMENT,
+    railwayService: process.env.RAILWAY_SERVICE_NAME,
+  })
 
   // Инициализируем базу данных
   const db = initDatabase(config.databasePath)
@@ -18,71 +30,95 @@ async function main() {
   // Запускаем API сервер для Mini App сразу, чтобы Railway видел порт
   const apiServer = createApiServer(db)
   const server = apiServer.listen(config.apiPort, '0.0.0.0', () => {
-    console.log(`✅ API сервер запущен на порту ${config.apiPort}`)
+    logger.info('API сервер запущен', { port: config.apiPort, host: '0.0.0.0' })
+  })
+  server.on('error', (error) => {
+    logger.error('Ошибка запуска HTTP сервера', { error })
   })
 
   // Graceful shutdown
-  process.on('SIGINT', () => {
-    console.log('\n⏹️  Остановка сервера...')
+  let shuttingDown = false
+  const shutdown = (signal: string) => {
+    if (shuttingDown) {
+      return
+    }
+    shuttingDown = true
+    logger.warn('Получен сигнал завершения', { signal })
     server.close(() => {
       db.close()
-      console.log('✅ Сервер остановлен')
+      logger.info('Сервер остановлен')
       process.exit(0)
     })
-  })
+  }
+  process.on('SIGINT', () => shutdown('SIGINT'))
+  process.on('SIGTERM', () => shutdown('SIGTERM'))
 
   // Создаём сервис GPT-4 Vision (если есть ключ)
   const visionService = config.openaiApiKey
     ? new VisionService(config.openaiApiKey)
     : null
+  if (!visionService) {
+    logger.warn('Vision-сервис не создан: OPENAI_API_KEY отсутствует')
+  }
 
   // Создаём и запускаем админ-бота (если есть токен и Vision-сервис)
   if (config.botToken && visionService) {
     try {
+      logger.info('Запуск админ-бота...')
       const adminBot = createAdminBot(config.botToken, db, visionService)
       adminBot.catch((err) => {
-        console.error('❌ Ошибка в админ-боте:', err)
+        logger.error('Ошибка в админ-боте', { error: err })
       })
       adminBot.start()
         .then(() => {
-          console.log('✅ Админ-бот запущен')
+          logger.info('Админ-бот запущен')
         })
         .catch((err) => {
-          console.error('❌ Ошибка старта админ-бота:', err)
+          logger.error('Ошибка старта админ-бота', { error: err })
         })
     } catch (error) {
-      console.error('⚠️  Не удалось запустить админ-бота:', error)
-      console.log('⚠️  Продолжаем работу без админ-бота')
+      logger.error('Не удалось запустить админ-бота', { error })
+      logger.warn('Продолжаем работу без админ-бота')
     }
   } else {
-    console.log('⚠️  BOT_TOKEN или OPENAI_API_KEY не указаны, админ-бот не запущен')
+    logger.warn('BOT_TOKEN или OPENAI_API_KEY не указаны, админ-бот не запущен')
   }
 
   // Создаём и запускаем клиентского бота (если токен указан)
   if (config.clientBotToken) {
     try {
+      logger.info('Запуск клиентского бота...')
       const clientBot = createClientBot(config.clientBotToken, db, config.miniAppUrl)
       clientBot.catch((err) => {
-        console.error('❌ Ошибка в клиентском боте:', err)
+        logger.error('Ошибка в клиентском боте', { error: err })
       })
       clientBot.start()
         .then(() => {
-          console.log('✅ Клиентский бот запущен')
+          logger.info('Клиентский бот запущен')
         })
         .catch((err) => {
-          console.error('❌ Ошибка старта клиентского бота:', err)
+          logger.error('Ошибка старта клиентского бота', { error: err })
         })
     } catch (error) {
-      console.error('⚠️  Не удалось запустить клиентского бота:', error)
-      console.log('⚠️  Продолжаем работу без клиентского бота')
+      logger.error('Не удалось запустить клиентского бота', { error })
+      logger.warn('Продолжаем работу без клиентского бота')
     }
   } else {
-    console.log('⚠️  CLIENT_BOT_TOKEN не указан, клиентский бот не запущен')
+    logger.warn('CLIENT_BOT_TOKEN не указан, клиентский бот не запущен')
   }
-  console.log('✅ Все сервисы инициализированы и готовы к работе!')
+  logger.info('Все сервисы инициализированы и готовы к работе')
 }
 
 main().catch((error) => {
-  console.error('💥 Критическая ошибка:', error)
+  logger.error('Критическая ошибка', { error })
+  process.exit(1)
+})
+
+process.on('unhandledRejection', (reason) => {
+  logger.error('UnhandledPromiseRejection', { error: reason })
+})
+
+process.on('uncaughtException', (error) => {
+  logger.error('UncaughtException', { error })
   process.exit(1)
 })

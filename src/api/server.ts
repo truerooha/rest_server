@@ -1,6 +1,7 @@
 import express, { Express, Request, Response, NextFunction } from 'express'
 import cors from 'cors'
 import Database from 'better-sqlite3'
+import { randomUUID } from 'crypto'
 import {
   BuildingRepository,
   UserRepository,
@@ -11,6 +12,7 @@ import {
 } from '../db/repository'
 import { CreditRepository } from '../db/repository-credits'
 import { ORDER_CONFIG } from '../utils/order-config'
+import { logger } from '../utils/logger'
 
 export interface ApiContext {
   db: Database.Database
@@ -25,6 +27,15 @@ export interface ApiContext {
   }
 }
 
+const getRequestId = (res: Response): string => {
+  const locals = res.locals as { requestId?: string }
+  return locals.requestId ?? 'unknown'
+}
+
+const logApiError = (res: Response, message: string, error: unknown): void => {
+  logger.error(message, { requestId: getRequestId(res), error })
+}
+
 /**
  * Создаёт Express API сервер
  */
@@ -32,6 +43,28 @@ export function createApiServer(db: Database.Database): Express {
   const app = express()
 
   // Middleware
+  app.use((req, res, next) => {
+    const requestId = randomUUID()
+    res.locals = { ...res.locals, requestId }
+    res.setHeader('x-request-id', requestId)
+
+    const start = process.hrtime.bigint()
+    res.on('finish', () => {
+      const durationMs = Number(process.hrtime.bigint() - start) / 1e6
+      const status = res.statusCode
+      const logFn = status >= 500 ? logger.error : status >= 400 ? logger.warn : logger.info
+      logFn('HTTP запрос завершен', {
+        requestId,
+        method: req.method,
+        path: req.originalUrl || req.url,
+        status,
+        durationMs: Math.round(durationMs),
+        ip: req.ip,
+        userAgent: req.get('user-agent'),
+      })
+    })
+    next()
+  })
   app.use(cors())
   app.use(express.json())
 
@@ -117,7 +150,7 @@ export function createApiServer(db: Database.Database): Express {
 
       res.json({ success: true, data: slots })
     } catch (error) {
-      console.error('Error fetching delivery slots:', error)
+      logApiError(res, 'Error fetching delivery slots', error)
       res.status(500).json({ success: false, error: 'Failed to fetch delivery slots' })
     }
   })
@@ -174,7 +207,7 @@ export function createApiServer(db: Database.Database): Express {
         },
       })
     } catch (error) {
-      console.error('Error initializing default data:', error)
+      logApiError(res, 'Error initializing default data', error)
       res.status(500).json({ success: false, error: 'Failed to initialize default data' })
     }
   })
@@ -187,7 +220,7 @@ export function createApiServer(db: Database.Database): Express {
       const buildings = context.repos.building.findAll()
       res.json({ success: true, data: buildings })
     } catch (error) {
-      console.error('Error fetching buildings:', error)
+      logApiError(res, 'Error fetching buildings', error)
       res.status(500).json({ success: false, error: 'Failed to fetch buildings' })
     }
   })
@@ -204,7 +237,7 @@ export function createApiServer(db: Database.Database): Express {
 
       res.json({ success: true, data: building })
     } catch (error) {
-      console.error('Error fetching building:', error)
+      logApiError(res, 'Error fetching building', error)
       res.status(500).json({ success: false, error: 'Failed to fetch building' })
     }
   })
@@ -236,7 +269,7 @@ export function createApiServer(db: Database.Database): Express {
         res.status(400).json({ success: false, error: 'buildingId parameter is required' })
       }
     } catch (error) {
-      console.error('Error fetching restaurants:', error)
+      logApiError(res, 'Error fetching restaurants', error)
       res.status(500).json({ success: false, error: 'Failed to fetch restaurants' })
     }
   })
@@ -253,7 +286,7 @@ export function createApiServer(db: Database.Database): Express {
 
       res.json({ success: true, data: restaurant })
     } catch (error) {
-      console.error('Error fetching restaurant:', error)
+      logApiError(res, 'Error fetching restaurant', error)
       res.status(500).json({ success: false, error: 'Failed to fetch restaurant' })
     }
   })
@@ -286,7 +319,7 @@ export function createApiServer(db: Database.Database): Express {
         },
       })
     } catch (error) {
-      console.error('Error fetching menu:', error)
+      logApiError(res, 'Error fetching menu', error)
       res.status(500).json({ success: false, error: 'Failed to fetch menu' })
     }
   })
@@ -305,7 +338,7 @@ export function createApiServer(db: Database.Database): Express {
 
       res.json({ success: true, data: user })
     } catch (error) {
-      console.error('Error fetching user:', error)
+      logApiError(res, 'Error fetching user', error)
       res.status(500).json({ success: false, error: 'Failed to fetch user' })
     }
   })
@@ -329,7 +362,7 @@ export function createApiServer(db: Database.Database): Express {
 
       res.json({ success: true, data: user })
     } catch (error) {
-      console.error('Error creating/updating user:', error)
+      logApiError(res, 'Error creating/updating user', error)
       res.status(500).json({ success: false, error: 'Failed to create/update user' })
     }
   })
@@ -349,7 +382,7 @@ export function createApiServer(db: Database.Database): Express {
 
       res.json({ success: true, data: user })
     } catch (error) {
-      console.error('Error updating user building:', error)
+      logApiError(res, 'Error updating user building', error)
       res.status(500).json({ success: false, error: 'Failed to update user building' })
     }
   })
@@ -370,7 +403,7 @@ export function createApiServer(db: Database.Database): Express {
 
       res.json({ success: true, data: parsedOrders })
     } catch (error) {
-      console.error('Error fetching orders:', error)
+      logApiError(res, 'Error fetching orders', error)
       res.status(500).json({ success: false, error: 'Failed to fetch orders' })
     }
   })
@@ -406,7 +439,7 @@ export function createApiServer(db: Database.Database): Express {
         },
       })
     } catch (error) {
-      console.error('Error creating order:', error)
+      logApiError(res, 'Error creating order', error)
       res.status(500).json({ success: false, error: 'Failed to create order' })
     }
   })
@@ -449,7 +482,7 @@ export function createApiServer(db: Database.Database): Express {
         },
       })
     } catch (error) {
-      console.error('Error fetching group order:', error)
+      logApiError(res, 'Error fetching group order', error)
       res.status(500).json({ success: false, error: 'Failed to fetch group order' })
     }
   })
@@ -483,7 +516,7 @@ export function createApiServer(db: Database.Database): Express {
         },
       })
     } catch (error) {
-      console.error('Error updating order status:', error)
+      logApiError(res, 'Error updating order status', error)
       res.status(500).json({ success: false, error: 'Failed to update order status' })
     }
   })
@@ -517,7 +550,7 @@ export function createApiServer(db: Database.Database): Express {
         },
       })
     } catch (error) {
-      console.error('Error cancelling order:', error)
+      logApiError(res, 'Error cancelling order', error)
       res.status(500).json({ success: false, error: 'Failed to cancel order' })
     }
   })
@@ -538,7 +571,7 @@ export function createApiServer(db: Database.Database): Express {
 
       res.json({ success: true, data: credit })
     } catch (error) {
-      console.error('Error fetching credits:', error)
+      logApiError(res, 'Error fetching credits', error)
       res.status(500).json({ success: false, error: 'Failed to fetch credits' })
     }
   })
@@ -575,7 +608,7 @@ export function createApiServer(db: Database.Database): Express {
       res.json({ success: true, data: credit })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to adjust credits'
-      console.error('Error adjusting credits:', error)
+      logApiError(res, 'Error adjusting credits', error)
       res.status(500).json({ success: false, error: message })
     }
   })
@@ -589,14 +622,14 @@ export function createApiServer(db: Database.Database): Express {
       const transactions = context.repos.credit.getTransactions(userId, limit)
       res.json({ success: true, data: transactions })
     } catch (error) {
-      console.error('Error fetching credit transactions:', error)
+      logApiError(res, 'Error fetching credit transactions', error)
       res.status(500).json({ success: false, error: 'Failed to fetch transactions' })
     }
   })
 
   // Error handling middleware
   app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-    console.error('Unhandled error:', err)
+    logApiError(res, 'Unhandled error', err)
     res.status(500).json({ success: false, error: 'Internal server error' })
   })
 
