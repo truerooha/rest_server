@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "dev:api": "tsx watch src/api-only.ts",
-    "start": "node dist/index.js",
+    "start": "node dist/scripts/seed-default-data.js && node dist/index.js",
     "start:api": "node dist/api-only.js",
     "build": "tsc && cp src/db/migrations/*.sql dist/db/migrations/",
     "migrate": "tsx src/db/migrations/migrate.ts ./database.db",

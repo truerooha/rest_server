@@ -28,12 +28,6 @@ async function main() {
 
   // Инициализируем базу данных
   const db = initDatabase(config.databasePath)
-
-  console.log('Environment Debug:', {
-    PORT: process.env.PORT,
-    API_PORT: process.env.API_PORT,
-    configApiPort: config.apiPort
-  })
   
   // Применяем миграции
   if (config.disableMigrations) {
@@ -47,14 +41,10 @@ async function main() {
   const port = config.apiPort
   const host = '0.0.0.0'
   
-  console.log(`Attempting to listen on ${host}:${port}`)
-  
   const server = apiServer.listen(port, host, () => {
-    console.log(`Server is definitely listening on ${host}:${port}`)
     logger.info('API сервер запущен', { port, host })
   })
   server.on('error', (error) => {
-    console.error('SERVER FAILED TO START:', error)
     logger.error('Ошибка запуска HTTP сервера', { error })
     process.exit(1)
   })
