@@ -13,11 +13,13 @@ export const config = {
   miniAppUrl: process.env.MINI_APP_URL || 'https://localhost:3001',
 }
 
-// Проверяем обязательные переменные
+// Внимание:
+// - Для API сервера на Railway BOT_TOKEN и OPENAI_API_KEY не обязательны.
+// - Если их нет — боты и Vision-сервис просто не будут запущены.
 if (!config.botToken) {
-  throw new Error('BOT_TOKEN не найден в .env файле')
+  console.warn('⚠️ BOT_TOKEN не найден: админ-бот не будет запущен')
 }
 
 if (!config.openaiApiKey) {
-  throw new Error('OPENAI_API_KEY не найден в .env файле')
+  console.warn('⚠️ OPENAI_API_KEY не найден: Vision-сервис не будет доступен')
 }

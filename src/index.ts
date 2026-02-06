@@ -15,20 +15,26 @@ async function main() {
   // Применяем миграции
   applyMigrations(config.databasePath)
 
-  // Создаём сервис GPT-4 Vision
-  const visionService = new VisionService(config.openaiApiKey!)
+  // Создаём сервис GPT-4 Vision (если есть ключ)
+  const visionService = config.openaiApiKey
+    ? new VisionService(config.openaiApiKey)
+    : null
 
-  // Создаём и запускаем админ-бота (с обработкой ошибок, чтобы не блокировать API)
-  try {
-    const adminBot = createAdminBot(config.botToken!, db, visionService)
-    adminBot.catch((err) => {
-      console.error('❌ Ошибка в админ-боте:', err)
-    })
-    await adminBot.start()
-    console.log('✅ Админ-бот запущен')
-  } catch (error) {
-    console.error('⚠️  Не удалось запустить админ-бота:', error)
-    console.log('⚠️  Продолжаем запуск без админ-бота (API сервер будет работать)')
+  // Создаём и запускаем админ-бота (если есть токен и Vision-сервис)
+  if (config.botToken && visionService) {
+    try {
+      const adminBot = createAdminBot(config.botToken, db, visionService)
+      adminBot.catch((err) => {
+        console.error('❌ Ошибка в админ-боте:', err)
+      })
+      await adminBot.start()
+      console.log('✅ Админ-бот запущен')
+    } catch (error) {
+      console.error('⚠️  Не удалось запустить админ-бота:', error)
+      console.log('⚠️  Продолжаем запуск без админ-бота (API сервер будет работать)')
+    }
+  } else {
+    console.log('⚠️  BOT_TOKEN или OPENAI_API_KEY не указаны, админ-бот не запущен')
   }
 
   // Создаём и запускаем клиентского бота (если токен указан)
