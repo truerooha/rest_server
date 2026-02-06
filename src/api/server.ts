@@ -9,6 +9,7 @@ import {
   RestaurantBuildingRepository,
   OrderRepository,
 } from '../db/repository'
+import { CreditRepository } from '../db/repository-credits'
 import { ORDER_CONFIG } from '../utils/order-config'
 
 export interface ApiContext {
@@ -20,6 +21,7 @@ export interface ApiContext {
     menu: MenuRepository
     restaurantBuilding: RestaurantBuildingRepository
     order: OrderRepository
+    credit: CreditRepository
   }
 }
 
@@ -43,6 +45,7 @@ export function createApiServer(db: Database.Database): Express {
       menu: new MenuRepository(db),
       restaurantBuilding: new RestaurantBuildingRepository(db),
       order: new OrderRepository(db),
+      credit: new CreditRepository(db),
     },
   }
 
@@ -373,6 +376,189 @@ export function createApiServer(db: Database.Database): Express {
     } catch (error) {
       console.error('Error creating order:', error)
       res.status(500).json({ success: false, error: 'Failed to create order' })
+    }
+  })
+
+  // GET /api/group-orders - получить общий заказ по слоту/зданию/ресторану
+  app.get('/api/group-orders', (req: Request, res: Response) => {
+    try {
+      const deliverySlot = String(req.query.deliverySlot || '')
+      const buildingId = req.query.buildingId ? parseInt(String(req.query.buildingId)) : null
+      const restaurantId = req.query.restaurantId ? parseInt(String(req.query.restaurantId)) : null
+
+      if (!deliverySlot || !buildingId || !restaurantId) {
+        return res.status(400).json({
+          success: false,
+          error: 'deliverySlot, buildingId, and restaurantId are required',
+        })
+      }
+
+      // Получаем все заказы для этого слота/здания/ресторана
+      const orders = context.repos.order.findBySlotAndBuilding(deliverySlot, buildingId, restaurantId)
+
+      // Парсим items и считаем общую сумму
+      const parsedOrders = orders.map((order) => ({
+        ...order,
+        items: JSON.parse(order.items),
+      }))
+
+      const totalAmount = parsedOrders.reduce((sum, order) => sum + order.total_price, 0)
+      const participantCount = parsedOrders.length
+
+      res.json({
+        success: true,
+        data: {
+          deliverySlot,
+          buildingId,
+          restaurantId,
+          participantCount,
+          totalAmount,
+          orders: parsedOrders,
+        },
+      })
+    } catch (error) {
+      console.error('Error fetching group order:', error)
+      res.status(500).json({ success: false, error: 'Failed to fetch group order' })
+    }
+  })
+
+  // PATCH /api/orders/:id/status - обновить статус заказа
+  app.patch('/api/orders/:id/status', (req: Request, res: Response) => {
+    try {
+      const orderId = parseInt(String(req.params.id))
+      const { status } = req.body
+
+      const validStatuses = ['pending', 'confirmed', 'preparing', 'ready', 'delivered', 'cancelled']
+      if (!status || !validStatuses.includes(status)) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid status. Must be one of: ${validStatuses.join(', ')}`,
+        })
+      }
+
+      context.repos.order.updateStatus(orderId, status)
+      const order = context.repos.order.findById(orderId)
+
+      if (!order) {
+        return res.status(404).json({ success: false, error: 'Order not found' })
+      }
+
+      res.json({
+        success: true,
+        data: {
+          ...order,
+          items: JSON.parse(order.items),
+        },
+      })
+    } catch (error) {
+      console.error('Error updating order status:', error)
+      res.status(500).json({ success: false, error: 'Failed to update order status' })
+    }
+  })
+
+  // DELETE /api/orders/:id - отменить заказ
+  app.delete('/api/orders/:id', (req: Request, res: Response) => {
+    try {
+      const orderId = parseInt(String(req.params.id))
+      const order = context.repos.order.findById(orderId)
+
+      if (!order) {
+        return res.status(404).json({ success: false, error: 'Order not found' })
+      }
+
+      // Проверяем, можно ли отменить (только pending заказы)
+      if (order.status !== 'pending') {
+        return res.status(400).json({
+          success: false,
+          error: 'Only pending orders can be cancelled',
+        })
+      }
+
+      context.repos.order.updateStatus(orderId, 'cancelled')
+      const updatedOrder = context.repos.order.findById(orderId)
+
+      res.json({
+        success: true,
+        data: {
+          ...updatedOrder,
+          items: JSON.parse(updatedOrder!.items),
+        },
+      })
+    } catch (error) {
+      console.error('Error cancelling order:', error)
+      res.status(500).json({ success: false, error: 'Failed to cancel order' })
+    }
+  })
+
+  // === CREDITS ENDPOINTS ===
+
+  // GET /api/users/:userId/credits - получить баланс баллов пользователя
+  app.get('/api/users/:userId/credits', (req: Request, res: Response) => {
+    try {
+      const userId = parseInt(String(req.params.userId))
+      const credit = context.repos.credit.findByUserId(userId)
+
+      if (!credit) {
+        // Инициализируем баланс если не существует
+        const newCredit = context.repos.credit.initializeForUser(userId)
+        return res.json({ success: true, data: newCredit })
+      }
+
+      res.json({ success: true, data: credit })
+    } catch (error) {
+      console.error('Error fetching credits:', error)
+      res.status(500).json({ success: false, error: 'Failed to fetch credits' })
+    }
+  })
+
+  // POST /api/users/:userId/credits/adjust - изменить баланс баллов
+  app.post('/api/users/:userId/credits/adjust', (req: Request, res: Response) => {
+    try {
+      const userId = parseInt(String(req.params.userId))
+      const { amount, type, description, order_id } = req.body
+
+      if (!amount || !type || !description) {
+        return res.status(400).json({
+          success: false,
+          error: 'amount, type, and description are required',
+        })
+      }
+
+      const validTypes = ['earn', 'spend', 'refund']
+      if (!validTypes.includes(type)) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid type. Must be one of: ${validTypes.join(', ')}`,
+        })
+      }
+
+      const credit = context.repos.credit.adjustBalance(
+        userId,
+        amount,
+        type,
+        description,
+        order_id,
+      )
+
+      res.json({ success: true, data: credit })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to adjust credits'
+      console.error('Error adjusting credits:', error)
+      res.status(500).json({ success: false, error: message })
+    }
+  })
+
+  // GET /api/users/:userId/credits/transactions - получить историю транзакций
+  app.get('/api/users/:userId/credits/transactions', (req: Request, res: Response) => {
+    try {
+      const userId = parseInt(String(req.params.userId))
+      const limit = req.query.limit ? parseInt(String(req.query.limit)) : 50
+
+      const transactions = context.repos.credit.getTransactions(userId, limit)
+      res.json({ success: true, data: transactions })
+    } catch (error) {
+      console.error('Error fetching credit transactions:', error)
+      res.status(500).json({ success: false, error: 'Failed to fetch transactions' })
     }
   })
 

@@ -357,6 +357,16 @@ export class OrderRepository {
       .all(status) as Order[]
   }
 
+  findBySlotAndBuilding(deliverySlot: string, buildingId: number, restaurantId: number): Order[] {
+    return this.db
+      .prepare(`
+        SELECT * FROM orders
+        WHERE delivery_slot = ? AND building_id = ? AND restaurant_id = ? AND status != 'cancelled'
+        ORDER BY created_at DESC
+      `)
+      .all(deliverySlot, buildingId, restaurantId) as Order[]
+  }
+
   updateStatus(id: number, status: OrderStatus): void {
     this.db
       .prepare('UPDATE orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
