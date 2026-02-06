@@ -49,6 +49,31 @@ export function createApiServer(db: Database.Database): Express {
     },
   }
 
+  const findRestaurantWithMenu = () => {
+    const row = db
+      .prepare(
+        `
+          SELECT restaurant_id as id, COUNT(*) as item_count
+          FROM menu_items
+          WHERE is_available = 1
+          GROUP BY restaurant_id
+          ORDER BY item_count DESC
+          LIMIT 1
+        `,
+      )
+      .get() as { id: number; item_count: number } | undefined
+
+    if (!row) {
+      return null
+    }
+
+    const restaurant = db
+      .prepare('SELECT * FROM restaurants WHERE id = ?')
+      .get(row.id) as any | undefined
+
+    return restaurant ?? null
+  }
+
   // Health check
   app.get('/api/health', (_req: Request, res: Response) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() })
@@ -97,28 +122,22 @@ export function createApiServer(db: Database.Database): Express {
     }
   })
 
-  // Инициализация дефолтных данных (только для первого запуска)
+  // Инициализация/починка дефолтных данных
   app.post('/api/init-default-data', async (_req: Request, res: Response) => {
     try {
       // Проверяем, есть ли уже данные
       const buildings = context.repos.building.findAll()
-      const coworkingExists = buildings.find(b => b.name === 'Коворкинг')
+      const coworkingExists = buildings.find((b) => b.name === 'Коворкинг')
 
-      if (coworkingExists) {
-        return res.json({
-          success: true,
-          message: 'Дефолтные данные уже существуют',
-          data: { building: coworkingExists },
+      // Гарантируем существование здания "Коворкинг"
+      const coworkingBuilding =
+        coworkingExists ??
+        context.repos.building.create({
+          name: 'Коворкинг',
+          address: 'Дефолтный адрес коворкинга',
         })
-      }
 
-      // Создаём здание "Коворкинг"
-      const coworkingBuilding = context.repos.building.create({
-        name: 'Коворкинг',
-        address: 'Дефолтный адрес коворкинга',
-      })
-
-      // Находим первый ресторан и переименовываем в "Грамм"
+      // Находим ресторан с меню (если есть), иначе берём первый
       const restaurants = db.prepare('SELECT * FROM restaurants').all() as any[]
       let restaurant: any
 
@@ -130,9 +149,9 @@ export function createApiServer(db: Database.Database): Express {
         })
         restaurant = result
       } else {
-        restaurant = restaurants[0]
-        // Переименовываем в "Грамм" если нужно
-        if (restaurant.name !== 'Грамм') {
+        const withMenu = findRestaurantWithMenu()
+        restaurant = withMenu ?? restaurants[0]
+        if (!withMenu && restaurant.name !== 'Грамм') {
           db.prepare('UPDATE restaurants SET name = ? WHERE id = ?').run('Грамм', restaurant.id)
         }
       }
@@ -151,7 +170,7 @@ export function createApiServer(db: Database.Database): Express {
         message: 'Дефолтные данные успешно созданы',
         data: {
           building: coworkingBuilding,
-          restaurant: { id: restaurant.id, name: 'Грамм' },
+          restaurant: { id: restaurant.id, name: restaurant.name },
         },
       })
     } catch (error) {
@@ -199,6 +218,19 @@ export function createApiServer(db: Database.Database): Express {
 
       if (buildingId) {
         const restaurants = context.repos.restaurantBuilding.findRestaurantsByBuildingId(buildingId)
+        if (restaurants.length === 0) {
+          const fallbackRestaurant = findRestaurantWithMenu()
+          if (fallbackRestaurant) {
+            const existingLink = db
+              .prepare('SELECT * FROM restaurant_buildings WHERE restaurant_id = ? AND building_id = ?')
+              .get(fallbackRestaurant.id, buildingId)
+            if (!existingLink) {
+              context.repos.restaurantBuilding.link(fallbackRestaurant.id, buildingId)
+            }
+            res.json({ success: true, data: [fallbackRestaurant] })
+            return
+          }
+        }
         res.json({ success: true, data: restaurants })
       } else {
         res.status(400).json({ success: false, error: 'buildingId parameter is required' })
