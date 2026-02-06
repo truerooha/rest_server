@@ -15,6 +15,7 @@ const envSchema = z.object({
   API_PORT: z.string().optional(),
   MINI_APP_URL: z.string().optional(),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).optional(),
+  CORS_ALLOWED_ORIGINS: z.string().optional(),
 })
 
 const parsedEnv = envSchema.safeParse(process.env)
@@ -37,6 +38,9 @@ export const config = {
   apiPort: parseInt(env.PORT || env.API_PORT || '3002'),
   miniAppUrl: env.MINI_APP_URL || 'https://localhost:3001',
   logLevel: env.LOG_LEVEL,
+  corsAllowedOrigins: env.CORS_ALLOWED_ORIGINS
+    ? env.CORS_ALLOWED_ORIGINS.split(',').map((origin) => origin.trim()).filter(Boolean)
+    : [],
 }
 
 // Внимание:

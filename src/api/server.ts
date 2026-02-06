@@ -13,6 +13,7 @@ import {
 import { CreditRepository } from '../db/repository-credits'
 import { ORDER_CONFIG } from '../utils/order-config'
 import { logger } from '../utils/logger'
+import { config } from '../utils/config'
 
 export interface ApiContext {
   db: Database.Database
@@ -65,7 +66,31 @@ export function createApiServer(db: Database.Database): Express {
     })
     next()
   })
-  app.use(cors())
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        if (!origin) {
+          callback(null, true)
+          return
+        }
+
+        if (config.corsAllowedOrigins.length === 0) {
+          callback(null, true)
+          return
+        }
+
+        if (config.corsAllowedOrigins.includes(origin)) {
+          callback(null, true)
+          return
+        }
+
+        logger.warn('CORS: origin запрещен', { origin })
+        callback(new Error('Not allowed by CORS'))
+      },
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+    }),
+  )
   app.use(express.json())
 
   // Создаём репозитории

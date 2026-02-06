@@ -12,6 +12,7 @@ async function main() {
     logLevel: config.logLevel ?? logger.level,
     railwayEnvironment: process.env.RAILWAY_ENVIRONMENT,
     railwayService: process.env.RAILWAY_SERVICE_NAME,
+    corsAllowedOrigins: config.corsAllowedOrigins,
   })
 
   // Инициализируем базу данных
