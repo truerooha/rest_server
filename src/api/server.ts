@@ -9,6 +9,7 @@ import {
   RestaurantBuildingRepository,
   OrderRepository,
 } from '../db/repository'
+import { ORDER_CONFIG } from '../utils/order-config'
 
 export interface ApiContext {
   db: Database.Database
@@ -48,6 +49,49 @@ export function createApiServer(db: Database.Database): Express {
   // Health check
   app.get('/api/health', (_req: Request, res: Response) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() })
+  })
+
+  // GET /api/delivery-slots - получить доступные слоты доставки
+  app.get('/api/delivery-slots', (_req: Request, res: Response) => {
+    try {
+      const now = new Date()
+      const nowMinutes = now.getHours() * 60 + now.getMinutes()
+
+      const toMinutes = (time: string) => {
+        const [hours, minutes] = time.split(':').map(Number)
+        return hours * 60 + minutes
+      }
+
+      const toTime = (minutesTotal: number) => {
+        const hours = Math.floor(minutesTotal / 60)
+        const minutes = minutesTotal % 60
+        const hoursLabel = String(hours).padStart(2, '0')
+        const minutesLabel = String(minutes).padStart(2, '0')
+        return `${hoursLabel}:${minutesLabel}`
+      }
+
+      const slots = ORDER_CONFIG.deliverySlots.map((slot) => {
+        const slotMinutes = toMinutes(slot.time)
+        const deadlineMinutes = Math.max(
+          slotMinutes - ORDER_CONFIG.orderLeadMinutes,
+          0,
+        )
+        const deadline = toTime(deadlineMinutes)
+        const isAvailable = nowMinutes <= deadlineMinutes
+
+        return {
+          id: slot.id,
+          time: slot.time,
+          deadline,
+          isAvailable,
+        }
+      })
+
+      res.json({ success: true, data: slots })
+    } catch (error) {
+      console.error('Error fetching delivery slots:', error)
+      res.status(500).json({ success: false, error: 'Failed to fetch delivery slots' })
+    }
   })
 
   // Инициализация дефолтных данных (только для первого запуска)
