@@ -14,7 +14,7 @@ async function main() {
 
   // Запускаем API сервер для Mini App
   const apiServer = createApiServer(db)
-  const server = apiServer.listen(config.apiPort, () => {
+  const server = apiServer.listen(config.apiPort, '0.0.0.0', () => {
     console.log(`✅ API сервер запущен на порту ${config.apiPort}`)
     console.log(`📡 Доступен по адресу: http://localhost:${config.apiPort}`)
   })

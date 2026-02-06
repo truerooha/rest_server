@@ -17,7 +17,7 @@ async function main() {
 
   // Запускаем API сервер для Mini App сразу, чтобы Railway видел порт
   const apiServer = createApiServer(db)
-  const server = apiServer.listen(config.apiPort, () => {
+  const server = apiServer.listen(config.apiPort, '0.0.0.0', () => {
     console.log(`✅ API сервер запущен на порту ${config.apiPort}`)
   })
 
