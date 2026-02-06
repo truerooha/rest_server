@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev:api": "tsx watch src/api-only.ts",
     "start": "node dist/index.js",
     "build": "tsc",
     "migrate": "tsx src/db/migrations/migrate.ts ./database.db",

@@ -18,22 +18,32 @@ async function main() {
   // Создаём сервис GPT-4 Vision
   const visionService = new VisionService(config.openaiApiKey!)
 
-  // Создаём и запускаем админ-бота
-  const adminBot = createAdminBot(config.botToken!, db, visionService)
-  adminBot.catch((err) => {
-    console.error('❌ Ошибка в админ-боте:', err)
-  })
-  await adminBot.start()
-  console.log('✅ Админ-бот запущен')
+  // Создаём и запускаем админ-бота (с обработкой ошибок, чтобы не блокировать API)
+  try {
+    const adminBot = createAdminBot(config.botToken!, db, visionService)
+    adminBot.catch((err) => {
+      console.error('❌ Ошибка в админ-боте:', err)
+    })
+    await adminBot.start()
+    console.log('✅ Админ-бот запущен')
+  } catch (error) {
+    console.error('⚠️  Не удалось запустить админ-бота:', error)
+    console.log('⚠️  Продолжаем запуск без админ-бота (API сервер будет работать)')
+  }
 
   // Создаём и запускаем клиентского бота (если токен указан)
   if (config.clientBotToken) {
-    const clientBot = createClientBot(config.clientBotToken, db, config.miniAppUrl)
-    clientBot.catch((err) => {
-      console.error('❌ Ошибка в клиентском боте:', err)
-    })
-    await clientBot.start()
-    console.log('✅ Клиентский бот запущен')
+    try {
+      const clientBot = createClientBot(config.clientBotToken, db, config.miniAppUrl)
+      clientBot.catch((err) => {
+        console.error('❌ Ошибка в клиентском боте:', err)
+      })
+      await clientBot.start()
+      console.log('✅ Клиентский бот запущен')
+    } catch (error) {
+      console.error('⚠️  Не удалось запустить клиентского бота:', error)
+      console.log('⚠️  Продолжаем запуск без клиентского бота (API сервер будет работать)')
+    }
   } else {
     console.log('⚠️  CLIENT_BOT_TOKEN не указан, клиентский бот не запущен')
   }

@@ -9,7 +9,7 @@ export const config = {
   openaiApiKey: process.env.OPENAI_API_KEY,
   databasePath: process.env.DATABASE_PATH || './database.db',
   nodeEnv: process.env.NODE_ENV || 'development',
-  apiPort: parseInt(process.env.API_PORT || '3000'),
+  apiPort: parseInt(process.env.API_PORT || '3002'),
   miniAppUrl: process.env.MINI_APP_URL || 'https://localhost:3001',
 }
 
