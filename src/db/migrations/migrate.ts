@@ -93,6 +93,36 @@ export function applyMigrations(dbOrPath: Database.Database | string): void {
   } else {
     logger.info('Применено миграций', { appliedCount })
   }
+
+  // Страховка: если таблица user_credits отсутствует (например, БД создана до появления миграции 003), создаём её
+  const hasCreditsTable = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='user_credits'"
+  ).get()
+  if (!hasCreditsTable) {
+    logger.warn('Таблица user_credits отсутствует, создаём...')
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS user_credits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        amount REAL NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        UNIQUE(user_id)
+      );
+      CREATE TABLE IF NOT EXISTS credit_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        amount REAL NOT NULL,
+        type TEXT NOT NULL CHECK(type IN ('earn', 'spend', 'refund')),
+        description TEXT,
+        order_id INTEGER,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL
+      );
+    `)
+  }
   
   if (shouldClose) {
     db.close()

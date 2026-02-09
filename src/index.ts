@@ -74,13 +74,25 @@ async function main() {
     logger.warn('Vision-сервис не создан: OPENAI_API_KEY отсутствует')
   }
 
+  // Создаём клиентского бота первым (нужен для уведомлений из админ-бота)
+  let clientBot: ReturnType<typeof createClientBot> | null = null
+  if (!config.disableBots && !config.disableClientBot && config.clientBotToken) {
+    clientBot = createClientBot(config.clientBotToken, db, config.miniAppUrl)
+  }
+
   // Создаём и запускаем админ-бота (если есть токен и Vision-сервис)
   if (config.disableBots || config.disableAdminBot) {
     logger.warn('Админ-бот отключён флагами конфигурации')
   } else if (config.botToken && visionService) {
     try {
       logger.info('Запуск админ-бота...')
-      const adminBot = createAdminBot(config.botToken, db, visionService)
+      const notifyUser =
+        clientBot &&
+        ((telegramUserId: number, text: string) =>
+          clientBot!.api.sendMessage(telegramUserId, text))
+      const adminBot = createAdminBot(config.botToken, db, visionService, {
+        notifyUser: notifyUser ?? undefined,
+      })
       adminBot.catch((err) => {
         logger.error('Ошибка в админ-боте', { error: err })
       })
@@ -99,13 +111,10 @@ async function main() {
     logger.warn('BOT_TOKEN или OPENAI_API_KEY не указаны, админ-бот не запущен')
   }
 
-  // Создаём и запускаем клиентского бота (если токен указан)
-  if (config.disableBots || config.disableClientBot) {
-    logger.warn('Клиентский бот отключён флагами конфигурации')
-  } else if (config.clientBotToken) {
+  // Запускаем клиентского бота (если создан)
+  if (clientBot) {
     try {
       logger.info('Запуск клиентского бота...')
-      const clientBot = createClientBot(config.clientBotToken, db, config.miniAppUrl)
       clientBot.catch((err) => {
         logger.error('Ошибка в клиентском боте', { error: err })
       })
@@ -120,7 +129,7 @@ async function main() {
       logger.error('Не удалось запустить клиентского бота', { error })
       logger.warn('Продолжаем работу без клиентского бота')
     }
-  } else {
+  } else if (!config.disableBots && !config.disableClientBot) {
     logger.warn('CLIENT_BOT_TOKEN не указан, клиентский бот не запущен')
   }
   logger.info('Все сервисы инициализированы и готовы к работе')

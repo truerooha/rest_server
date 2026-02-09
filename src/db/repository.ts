@@ -43,6 +43,12 @@ export class RestaurantRepository {
       .prepare('SELECT * FROM restaurants WHERE chat_id = ?')
       .get(chatId) as Restaurant | undefined
   }
+
+  findById(id: number): Restaurant | undefined {
+    return this.db
+      .prepare('SELECT * FROM restaurants WHERE id = ?')
+      .get(id) as Restaurant | undefined
+  }
 }
 
 export class MenuRepository {
@@ -356,12 +362,14 @@ export class OrderRepository {
       .prepare('SELECT * FROM orders WHERE status = ? ORDER BY created_at DESC')
       .all(status) as Order[]
   }
-
   findBySlotAndBuilding(deliverySlot: string, buildingId: number, restaurantId: number): Order[] {
     return this.db
       .prepare(`
         SELECT * FROM orders
-        WHERE delivery_slot = ? AND building_id = ? AND restaurant_id = ? AND status != 'cancelled'
+        WHERE delivery_slot = ?
+          AND building_id = ?
+          AND restaurant_id = ?
+          AND status IN ('confirmed', 'preparing', 'ready', 'delivered')
         ORDER BY created_at DESC
       `)
       .all(deliverySlot, buildingId, restaurantId) as Order[]

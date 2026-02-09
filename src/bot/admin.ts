@@ -1,8 +1,13 @@
 import { Bot, Context, InlineKeyboard } from 'grammy'
-import { RestaurantRepository, MenuRepository } from '../db/repository'
+import { RestaurantRepository, MenuRepository, OrderRepository, UserRepository } from '../db/repository'
+import { CreditRepository } from '../db/repository-credits'
 import { VisionService } from '../services/vision'
 import { MENU_CATEGORIES_ORDER, detectCategory, isBreakfastDish } from '../db/constants'
 import Database from 'better-sqlite3'
+
+export type AdminBotOptions = {
+  notifyUser?: (telegramUserId: number, text: string) => Promise<void>
+}
 
 // Функция для экранирования HTML спецсимволов
 function escapeHtml(text: string): string {
@@ -35,13 +40,17 @@ interface UserState {
 export function createBot(
   token: string,
   db: Database.Database,
-  visionService: VisionService
+  visionService: VisionService,
+  options?: AdminBotOptions
 ) {
   const bot = new Bot(token)
   const restaurantRepo = new RestaurantRepository(db)
   const menuRepo = new MenuRepository(db)
-  
-  // Хранилище состояний пользователей для диалогов
+  const orderRepo = new OrderRepository(db)
+  const userRepo = new UserRepository(db)
+  const creditRepo = new CreditRepository(db)
+  const notifyUser = options?.notifyUser
+
   const userStates = new Map<number, UserState>()
 
   // Команда /start
@@ -50,6 +59,9 @@ export function createBot(
       `👋 Привет! Я помогу тебе создать цифровое меню для твоего ресторана.
 
 📸 Просто отправь мне фото своего меню, и я распознаю все блюда, цены и категории автоматически!
+
+**Заказы:**
+/orders - список заказов (Принять / Готово / Отменить)
 
 **Просмотр меню:**
 /menu - показать меню по категориям
@@ -66,6 +78,119 @@ export function createBot(
 /clearall - удалить ВСЕ данные из базы`,
       { parse_mode: 'Markdown' }
     )
+  })
+
+  // Команда /orders - список заказов ресторана с кнопками Принять / Готово / Отменить
+  bot.command('orders', async (ctx: Context) => {
+    const chatId = ctx.chat?.id
+    if (!chatId) {
+      await ctx.reply('❌ Не удалось определить chat ID')
+      return
+    }
+    const restaurant = restaurantRepo.findByChatId(chatId)
+    if (!restaurant) {
+      await ctx.reply('❌ Ресторан не найден. Сначала отправьте фото меню или используйте /add.')
+      return
+    }
+    const orders = orderRepo.findActiveByRestaurantId(restaurant.id)
+    if (orders.length === 0) {
+      await ctx.reply('📋 Нет активных заказов.')
+      return
+    }
+    for (const order of orders) {
+      const items = JSON.parse(order.items) as Array<{ name: string; price: number; quantity: number }>
+      const lines = items.map((i) => `  • ${i.name} × ${i.quantity} — ${i.price * i.quantity} ₽`)
+      const text = `📦 Заказ #${order.id}\nСлот: ${order.delivery_slot}\nСумма: ${order.total_price} ₽\nСтатус: ${order.status}\n\n${lines.join('\n')}`
+      const keyboard = new InlineKeyboard()
+      if (order.status === 'confirmed') {
+        keyboard.text('✅ Принять', `order:${order.id}:accept`).text('❌ Отменить', `order:${order.id}:cancel`).row()
+      }
+      if (order.status === 'confirmed' || order.status === 'preparing') {
+        keyboard.text('🍽️ Готово', `order:${order.id}:ready`)
+      }
+      await ctx.reply(text, {
+        reply_markup: keyboard,
+      })
+    }
+  })
+
+  // Обработка кнопок заказа: Принять / Готово / Отменить
+  bot.on('callback_query', async (ctx: Context) => {
+    const data = ctx.callbackQuery?.data
+    if (!data || !data.startsWith('order:')) {
+      await ctx.answerCallbackQuery()
+      return
+    }
+    const parts = data.split(':')
+    if (parts.length < 3) {
+      await ctx.answerCallbackQuery()
+      return
+    }
+    const orderId = parseInt(parts[1], 10)
+    const action = parts[2]
+    if (!Number.isFinite(orderId) || !['accept', 'ready', 'cancel'].includes(action)) {
+      await ctx.answerCallbackQuery()
+      return
+    }
+    const chatId =
+      ctx.callbackQuery?.message && 'chat' in ctx.callbackQuery.message
+        ? ctx.callbackQuery.message.chat.id
+        : ctx.chat?.id
+    if (!chatId) {
+      await ctx.answerCallbackQuery()
+      return
+    }
+    const restaurant = restaurantRepo.findByChatId(chatId)
+    if (!restaurant) {
+      await ctx.answerCallbackQuery({ text: 'Ресторан не найден' })
+      return
+    }
+    const order = orderRepo.findById(orderId)
+    if (!order || order.restaurant_id !== restaurant.id) {
+      await ctx.answerCallbackQuery({ text: 'Заказ не найден' })
+      return
+    }
+    const user = userRepo.findById(order.user_id)
+    const telegramUserId = user?.telegram_user_id
+
+    if (action === 'accept') {
+      if (order.status !== 'confirmed') {
+        await ctx.answerCallbackQuery({ text: 'Заказ уже обработан' })
+        return
+      }
+      orderRepo.updateStatus(orderId, 'preparing')
+      await ctx.answerCallbackQuery({ text: 'Заказ принят в работу' })
+      if (notifyUser && telegramUserId) {
+        await notifyUser(telegramUserId, '✅ Ваш заказ принят в работу.')
+      }
+    } else if (action === 'ready') {
+      if (order.status !== 'confirmed' && order.status !== 'preparing') {
+        await ctx.answerCallbackQuery({ text: 'Заказ уже обработан' })
+        return
+      }
+      orderRepo.updateStatus(orderId, 'ready')
+      await ctx.answerCallbackQuery({ text: 'Отмечено: готово' })
+      if (notifyUser && telegramUserId) {
+        await notifyUser(telegramUserId, '🍽️ Ваш заказ готов!')
+      }
+    } else if (action === 'cancel') {
+      if (order.status === 'cancelled') {
+        await ctx.answerCallbackQuery({ text: 'Заказ уже отменён' })
+        return
+      }
+      if (order.status === 'confirmed') {
+        try {
+          creditRepo.adjustBalance(order.user_id, order.total_price, 'refund', 'Отмена заказа рестораном', orderId)
+        } catch {
+          // ignore refund errors (e.g. no credit record)
+        }
+      }
+      orderRepo.updateStatus(orderId, 'cancelled')
+      await ctx.answerCallbackQuery({ text: 'Заказ отменён' })
+      if (notifyUser && telegramUserId) {
+        await notifyUser(telegramUserId, '❌ Заказ отменён рестораном.')
+      }
+    }
   })
 
   // Команда /add - добавить блюдо вручную

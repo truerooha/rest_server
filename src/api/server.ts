@@ -11,6 +11,7 @@ import {
   OrderRepository,
 } from '../db/repository'
 import { CreditRepository } from '../db/repository-credits'
+import { DraftRepository } from '../db/repository-drafts'
 import { ORDER_CONFIG } from '../utils/order-config'
 import { logger } from '../utils/logger'
 import { config } from '../utils/config'
@@ -25,6 +26,7 @@ export interface ApiContext {
     restaurantBuilding: RestaurantBuildingRepository
     order: OrderRepository
     credit: CreditRepository
+    draft: DraftRepository
   }
 }
 
@@ -104,6 +106,7 @@ export function createApiServer(db: Database.Database): Express {
       restaurantBuilding: new RestaurantBuildingRepository(db),
       order: new OrderRepository(db),
       credit: new CreditRepository(db),
+      draft: new DraftRepository(db),
     },
   }
 
@@ -303,7 +306,7 @@ export function createApiServer(db: Database.Database): Express {
   app.get('/api/restaurants/:id', (req: Request, res: Response) => {
     try {
       const id = parseInt(String(req.params.id))
-      const restaurant = context.repos.restaurant.findByChatId(id)
+      const restaurant = context.repos.restaurant.findById(id)
 
       if (!restaurant) {
         return res.status(404).json({ success: false, error: 'Restaurant not found' })
@@ -412,6 +415,84 @@ export function createApiServer(db: Database.Database): Express {
     }
   })
 
+  // === DRAFT ENDPOINTS ===
+
+  // GET /api/draft?telegram_user_id=123 - получить черновик заказа
+  app.get('/api/draft', (req: Request, res: Response) => {
+    try {
+      const telegramUserId = req.query.telegram_user_id
+        ? parseInt(String(req.query.telegram_user_id))
+        : NaN
+      if (!Number.isFinite(telegramUserId)) {
+        return res.status(400).json({ success: false, error: 'telegram_user_id is required' })
+      }
+      const draft = context.repos.draft.findByTelegramId(telegramUserId)
+      if (!draft) {
+        return res.json({ success: true, data: null })
+      }
+      res.json({
+        success: true,
+        data: {
+          ...draft,
+          items: JSON.parse(draft.items),
+        },
+      })
+    } catch (error) {
+      logApiError(res, 'Error fetching draft', error)
+      res.status(500).json({ success: false, error: 'Failed to fetch draft' })
+    }
+  })
+
+  // PUT /api/draft - сохранить черновик (upsert по telegram_user_id)
+  app.put('/api/draft', (req: Request, res: Response) => {
+    try {
+      const { telegram_user_id, delivery_slot, restaurant_id, building_id, items } = req.body
+      if (!telegram_user_id) {
+        return res.status(400).json({ success: false, error: 'telegram_user_id is required' })
+      }
+      const telegramUserId = parseInt(String(telegram_user_id))
+      if (!Number.isFinite(telegramUserId)) {
+        return res.status(400).json({ success: false, error: 'telegram_user_id must be a number' })
+      }
+      const itemsStr =
+        Array.isArray(items) ? JSON.stringify(items) : typeof items === 'string' ? items : '[]'
+      const draft = context.repos.draft.put({
+        telegram_user_id: telegramUserId,
+        delivery_slot: delivery_slot ?? null,
+        restaurant_id: restaurant_id != null ? parseInt(String(restaurant_id)) : null,
+        building_id: building_id != null ? parseInt(String(building_id)) : null,
+        items: itemsStr,
+      })
+      res.json({
+        success: true,
+        data: {
+          ...draft,
+          items: JSON.parse(draft.items),
+        },
+      })
+    } catch (error) {
+      logApiError(res, 'Error saving draft', error)
+      res.status(500).json({ success: false, error: 'Failed to save draft' })
+    }
+  })
+
+  // DELETE /api/draft?telegram_user_id=123 - удалить черновик
+  app.delete('/api/draft', (req: Request, res: Response) => {
+    try {
+      const telegramUserId = req.query.telegram_user_id
+        ? parseInt(String(req.query.telegram_user_id))
+        : NaN
+      if (!Number.isFinite(telegramUserId)) {
+        return res.status(400).json({ success: false, error: 'telegram_user_id is required' })
+      }
+      context.repos.draft.delete(telegramUserId)
+      res.json({ success: true })
+    } catch (error) {
+      logApiError(res, 'Error deleting draft', error)
+      res.status(500).json({ success: false, error: 'Failed to delete draft' })
+    }
+  })
+
   // === ORDERS ENDPOINTS ===
 
   // GET /api/orders/:userId - получить заказы пользователя
@@ -433,26 +514,31 @@ export function createApiServer(db: Database.Database): Express {
     }
   })
 
-  // POST /api/orders - создать заказ
+  // POST /api/orders - создать заказ (принимает snake_case или camelCase)
   app.post('/api/orders', (req: Request, res: Response) => {
     try {
-      const { user_id, restaurant_id, building_id, items, total_price, delivery_slot } = req.body
+      const body = req.body as Record<string, unknown>
+      const user_id = body.user_id ?? body.userId
+      const restaurant_id = body.restaurant_id ?? body.restaurantId
+      const building_id = body.building_id ?? body.buildingId
+      const items = body.items
+      const total_price = body.total_price ?? body.totalPrice
+      const delivery_slot = body.delivery_slot ?? body.deliverySlot
 
-      if (!user_id || !restaurant_id || !building_id || !items || !total_price || !delivery_slot) {
+      if (!user_id || !restaurant_id || !building_id || !items || total_price == null || !delivery_slot) {
         return res.status(400).json({
           success: false,
           error: 'Missing required fields',
         })
       }
 
-      // Создаём заказ
       const order = context.repos.order.create({
-        user_id,
-        restaurant_id,
-        building_id,
+        user_id: Number(user_id),
+        restaurant_id: Number(restaurant_id),
+        building_id: Number(building_id),
         items: JSON.stringify(items),
-        total_price,
-        delivery_slot,
+        total_price: Number(total_price),
+        delivery_slot: String(delivery_slot),
         status: 'pending',
       })
 
@@ -494,6 +580,8 @@ export function createApiServer(db: Database.Database): Express {
 
       const totalAmount = parsedOrders.reduce((sum, order) => sum + order.total_price, 0)
       const participantCount = parsedOrders.length
+      const restaurant = context.repos.restaurant.findById(restaurantId)
+      const minimumAmount = restaurant?.min_order_amount ?? 0
 
       res.json({
         success: true,
@@ -503,12 +591,70 @@ export function createApiServer(db: Database.Database): Express {
           restaurantId,
           participantCount,
           totalAmount,
+          minimumAmount,
           orders: parsedOrders,
         },
       })
     } catch (error) {
       logApiError(res, 'Error fetching group order', error)
       res.status(500).json({ success: false, error: 'Failed to fetch group order' })
+    }
+  })
+
+  // POST /api/orders/:id/pay - оплатить заказ (Variant A: списание credits, статус confirmed)
+  app.post('/api/orders/:id/pay', (req: Request, res: Response) => {
+    try {
+      const orderId = parseInt(String(req.params.id))
+      const { telegram_user_id } = req.body
+      if (!telegram_user_id) {
+        return res.status(400).json({
+          success: false,
+          error: 'telegram_user_id is required',
+        })
+      }
+      const telegramUserId = parseInt(String(telegram_user_id))
+      const user = context.repos.user.findByTelegramId(telegramUserId)
+      if (!user) {
+        return res.status(404).json({ success: false, error: 'User not found' })
+      }
+      const order = context.repos.order.findById(orderId)
+      if (!order) {
+        return res.status(404).json({ success: false, error: 'Order not found' })
+      }
+      if (order.user_id !== user.id) {
+        return res.status(403).json({ success: false, error: 'Not your order' })
+      }
+      if (order.status !== 'pending') {
+        return res.status(400).json({
+          success: false,
+          error: 'Order already paid or cancelled',
+        })
+      }
+      const amount = order.total_price
+      try {
+        context.repos.credit.adjustBalance(
+          user.id,
+          -amount,
+          'spend',
+          'Оплата заказа',
+          orderId,
+        )
+      } catch (creditError) {
+        const msg = creditError instanceof Error ? creditError.message : 'Insufficient credits'
+        return res.status(400).json({ success: false, error: msg })
+      }
+      context.repos.order.updateStatus(orderId, 'confirmed')
+      const updated = context.repos.order.findById(orderId)!
+      res.json({
+        success: true,
+        data: {
+          ...updated,
+          items: JSON.parse(updated.items),
+        },
+      })
+    } catch (error) {
+      logApiError(res, 'Error paying order', error)
+      res.status(500).json({ success: false, error: 'Failed to pay order' })
     }
   })
 
@@ -546,32 +692,46 @@ export function createApiServer(db: Database.Database): Express {
     }
   })
 
-  // DELETE /api/orders/:id - отменить заказ
+  // DELETE /api/orders/:id - отменить заказ (до дедлайна: pending — просто отмена, confirmed — refund)
   app.delete('/api/orders/:id', (req: Request, res: Response) => {
     try {
       const orderId = parseInt(String(req.params.id))
+      const telegramUserId = req.query.telegram_user_id
+        ? parseInt(String(req.query.telegram_user_id))
+        : NaN
+      if (!Number.isFinite(telegramUserId)) {
+        return res.status(400).json({ success: false, error: 'telegram_user_id is required' })
+      }
+      const user = context.repos.user.findByTelegramId(telegramUserId)
+      if (!user) {
+        return res.status(404).json({ success: false, error: 'User not found' })
+      }
       const order = context.repos.order.findById(orderId)
-
       if (!order) {
         return res.status(404).json({ success: false, error: 'Order not found' })
       }
-
-      // Проверяем, можно ли отменить (только pending заказы)
-      if (order.status !== 'pending') {
-        return res.status(400).json({
-          success: false,
-          error: 'Only pending orders can be cancelled',
-        })
+      if (order.user_id !== user.id) {
+        return res.status(403).json({ success: false, error: 'Not your order' })
       }
-
+      if (order.status === 'cancelled') {
+        return res.status(400).json({ success: false, error: 'Order already cancelled' })
+      }
+      if (order.status === 'confirmed') {
+        context.repos.credit.adjustBalance(
+          user.id,
+          order.total_price,
+          'refund',
+          'Отмена заказа',
+          orderId,
+        )
+      }
       context.repos.order.updateStatus(orderId, 'cancelled')
-      const updatedOrder = context.repos.order.findById(orderId)
-
+      const updatedOrder = context.repos.order.findById(orderId)!
       res.json({
         success: true,
         data: {
           ...updatedOrder,
-          items: JSON.parse(updatedOrder!.items),
+          items: JSON.parse(updatedOrder.items),
         },
       })
     } catch (error) {

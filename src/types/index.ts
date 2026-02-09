@@ -4,6 +4,7 @@ export interface Restaurant {
   id: number
   name: string
   chat_id: number
+  min_order_amount?: number
   created_at: string
 }
 
