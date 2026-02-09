@@ -525,10 +525,19 @@ export function createApiServer(db: Database.Database): Express {
       const total_price = body.total_price ?? body.totalPrice
       const delivery_slot = body.delivery_slot ?? body.deliverySlot
 
-      if (!user_id || !restaurant_id || !building_id || !items || total_price == null || !delivery_slot) {
+      const missingFields: string[] = []
+      if (!user_id) missingFields.push('user_id')
+      if (!restaurant_id) missingFields.push('restaurant_id')
+      if (!building_id) missingFields.push('building_id')
+      if (!items) missingFields.push('items')
+      if (total_price == null) missingFields.push('total_price')
+      if (!delivery_slot) missingFields.push('delivery_slot')
+
+      if (missingFields.length > 0) {
+        logger.warn('Order creation: missing fields', { missingFields, body: req.body })
         return res.status(400).json({
           success: false,
-          error: 'Missing required fields',
+          error: `Missing required fields: ${missingFields.join(', ')}`,
         })
       }
 
