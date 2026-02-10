@@ -77,7 +77,8 @@ export function createBot(
 /edit - редактировать блюдо
 
 **Опасная зона:**
-/clearall - удалить все данные вашего ресторана`
+/clearall - удалить все данные вашего ресторана
+/wipeall - [ТЕСТ] удалить ВСЁ в базе`
     )
   }
 
@@ -752,6 +753,43 @@ export function createBot(
         await ctx.editMessageText('✅ Операция отменена. Данные в безопасности.')
         await ctx.answerCallbackQuery('Отменено')
       }
+
+      // [ТЕСТ] Подтверждение полной очистки базы
+      else if (data === 'confirm_wipeall') {
+        try {
+          const deleteAll = db.transaction(() => {
+            const tables = [
+              'orders',
+              'menu_items',
+              'restaurant_buildings',
+              'user_drafts',
+              'user_credits',
+              'credit_transactions',
+              'users',
+              'buildings',
+              'restaurants',
+            ]
+            for (const table of tables) {
+              try {
+                db.prepare(`DELETE FROM ${table}`).run()
+              } catch (e) {
+                if (e instanceof Error && !e.message.includes('no such table')) throw e
+              }
+            }
+          })
+          deleteAll()
+          await ctx.editMessageText('✅ [ТЕСТ] Вся база очищена.')
+          await ctx.answerCallbackQuery('Готово')
+        } catch (error) {
+          const err = error instanceof Error ? error.message : String(error)
+          await ctx.editMessageText(`❌ Ошибка: <code>${err}</code>`, { parse_mode: 'HTML' })
+          await ctx.answerCallbackQuery('Ошибка')
+        }
+      }
+      else if (data === 'cancel_wipeall') {
+        await ctx.editMessageText('✅ Отменено.')
+        await ctx.answerCallbackQuery('Отменено')
+      }
     } catch (error) {
       console.error('Ошибка обработки callback:', error)
       await ctx.answerCallbackQuery('Произошла ошибка')
@@ -1035,6 +1073,26 @@ export function createBot(
       console.error('Ошибка в команде /breakfasts:', error)
       await ctx.reply('❌ Произошла ошибка при формировании списка завтраков. Попробуйте ещё раз.')
     }
+  })
+
+  // [ТЕСТ] Команда /wipeall - удалить абсолютно всё в базе
+  bot.command('wipeall', async (ctx: Context) => {
+    const chatId = ctx.chat?.id
+    if (!chatId) return
+
+    const keyboard = new InlineKeyboard()
+      .text('⚠️ ДА, УДАЛИТЬ ВСЁ', 'confirm_wipeall')
+      .text('❌ Отмена', 'cancel_wipeall')
+
+    await ctx.reply(
+      '🚨 <b>[ТЕСТ] ОПАСНО!</b>\n\n' +
+      'Удалить ВСЕ данные в базе:\n' +
+      '• Все рестораны, меню, заказы\n' +
+      '• Всех пользователей, здания\n' +
+      '• Кредиты, черновики\n\n' +
+      '⚠️ <b>Необратимо!</b>',
+      { parse_mode: 'HTML', reply_markup: keyboard }
+    )
   })
 
   // Команда /clearall - удалить все данные ТЕКУЩЕГО ресторана
