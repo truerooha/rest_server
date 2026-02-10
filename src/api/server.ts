@@ -528,6 +528,45 @@ export function createApiServer(db: Database.Database): Express {
     }
   })
 
+  // GET /api/users/:userId/active-order - получить активный заказ пользователя для слота/здания/ресторана
+  app.get('/api/users/:userId/active-order', (req: Request, res: Response) => {
+    try {
+      const userId = parseInt(String(req.params.userId))
+      const deliverySlot = String(req.query.deliverySlot || '')
+      const buildingId = req.query.buildingId ? parseInt(String(req.query.buildingId)) : null
+      const restaurantId = req.query.restaurantId ? parseInt(String(req.query.restaurantId)) : null
+
+      if (!deliverySlot || !buildingId || !restaurantId || !Number.isFinite(userId)) {
+        return res.status(400).json({
+          success: false,
+          error: 'userId, deliverySlot, buildingId, and restaurantId are required',
+        })
+      }
+
+      const order = context.repos.order.findActiveByUserAndSlot(
+        userId,
+        buildingId,
+        restaurantId,
+        deliverySlot,
+      )
+
+      // Для блокировки интерфейса считаем "готовым" только подтверждённый/готовящийся заказ
+      if (!order || !['confirmed', 'preparing', 'ready'].includes(order.status)) {
+        return res.json({ success: true, data: null })
+      }
+
+      const parsed = {
+        ...order,
+        items: JSON.parse(order.items),
+      }
+
+      res.json({ success: true, data: parsed })
+    } catch (error) {
+      logApiError(res, 'Error fetching active order for user', error)
+      res.status(500).json({ success: false, error: 'Failed to fetch active order' })
+    }
+  })
+
   // POST /api/orders - создать заказ (принимает snake_case или camelCase)
   app.post('/api/orders', (req: Request, res: Response) => {
     try {
