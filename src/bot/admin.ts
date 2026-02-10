@@ -135,11 +135,10 @@ export function createBot(
   })
 
   // Обработка кнопок заказа: Принять / Готово / Отменить
-  bot.on('callback_query', async (ctx: Context) => {
+  bot.on('callback_query', async (ctx: Context, next: () => Promise<void>) => {
     const data = ctx.callbackQuery?.data
     if (!data || !data.startsWith('order:')) {
-      await ctx.answerCallbackQuery()
-      return
+      return next() // Передаём следующему обработчику (confirm_clearall, wipeall и т.д.)
     }
     const parts = data.split(':')
     if (parts.length < 3) {
