@@ -3,6 +3,7 @@ import { RestaurantRepository, MenuRepository, OrderRepository, UserRepository }
 import { CreditRepository } from '../db/repository-credits'
 import { DraftRepository } from '../db/repository-drafts'
 import { VisionService } from '../services/vision'
+import { logger } from '../utils/logger'
 import { MENU_CATEGORIES_ORDER, detectCategory, isBreakfastDish } from '../db/constants'
 import Database from 'better-sqlite3'
 
@@ -790,7 +791,7 @@ export function createBot(
         await ctx.answerCallbackQuery('Отменено')
       }
     } catch (error) {
-      console.error('Ошибка обработки callback:', error)
+      logger.error('Ошибка обработки callback', { error })
       await ctx.answerCallbackQuery('Произошла ошибка')
     }
   })
@@ -882,7 +883,7 @@ export function createBot(
 
       await ctx.reply(message, { parse_mode: 'Markdown' })
     } catch (error) {
-      console.error('Ошибка обработки фото:', error)
+      logger.error('Ошибка обработки фото', { error })
       await ctx.reply(
         `❌ Ошибка: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`
       )
@@ -892,28 +893,28 @@ export function createBot(
   // Команда /menu - показать текущее меню
   bot.command('menu', async (ctx: Context) => {
     try {
-      console.log('📋 Команда /menu получена')
+      logger.info('Команда /menu получена')
       
       const chatId = ctx.chat?.id
       if (!chatId) {
-        console.log('❌ Chat ID не определён')
+        logger.warn('Chat ID не определён для /menu')
         await ctx.reply('❌ Не удалось определить chat ID')
         return
       }
       
-      console.log(`📋 Chat ID: ${chatId}`)
+      logger.debug('Команда /menu: chatId', { chatId })
 
       const restaurant = restaurantRepo.findByChatId(chatId)
       if (!restaurant) {
-        console.log('⚠️  Ресторан не найден для chat ID:', chatId)
+        logger.warn('Ресторан не найден для /menu', { chatId })
         await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
         return
       }
       
-      console.log(`📋 Ресторан найден: ${restaurant.name} (ID: ${restaurant.id})`)
+      logger.debug('Ресторан найден для /menu', { restaurantId: restaurant.id, name: restaurant.name })
 
       const items = menuRepo.findByRestaurantId(restaurant.id)
-      console.log(`📋 Найдено блюд: ${items.length}`)
+      logger.debug('Найдено блюд для /menu', { count: items.length })
       
       if (items.length === 0) {
         await ctx.reply('Меню пусто. Отправьте фото меню!')
@@ -962,11 +963,11 @@ export function createBot(
       message += `<i>Всего блюд: ${items.length}</i>\n`
       message += `<i>Завтраков: ${items.filter(i => i.is_breakfast).length}</i>`
 
-      console.log(`📋 Отправляю меню (длина: ${message.length} символов)`)
+      logger.debug('Отправка меню', { length: message.length })
       await ctx.reply(message, { parse_mode: 'HTML' })
-      console.log('✅ Меню отправлено успешно')
+      logger.info('Меню отправлено успешно')
     } catch (error) {
-      console.error('❌ Ошибка в команде /menu:', error)
+      logger.error('Ошибка в команде /menu', { error })
       await ctx.reply('❌ Произошла ошибка при формировании меню. Попробуйте ещё раз.')
     }
   })
@@ -1022,7 +1023,7 @@ export function createBot(
 
       await ctx.reply(message, { parse_mode: 'HTML' })
     } catch (error) {
-      console.error('Ошибка в команде /categories:', error)
+      logger.error('Ошибка в команде /categories', { error })
       await ctx.reply('❌ Произошла ошибка при формировании статистики. Попробуйте ещё раз.')
     }
   })
@@ -1069,7 +1070,7 @@ export function createBot(
 
       await ctx.reply(message, { parse_mode: 'HTML' })
     } catch (error) {
-      console.error('Ошибка в команде /breakfasts:', error)
+      logger.error('Ошибка в команде /breakfasts', { error })
       await ctx.reply('❌ Произошла ошибка при формировании списка завтраков. Попробуйте ещё раз.')
     }
   })
@@ -1279,7 +1280,7 @@ export function createBot(
         }
       }
     } catch (error) {
-      console.error('Ошибка обработки диалога:', error)
+      logger.error('Ошибка обработки диалога', { error })
       await ctx.reply('❌ Произошла ошибка. Попробуйте снова с /add')
       userStates.delete(chatId)
     }

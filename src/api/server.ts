@@ -2,6 +2,7 @@ import express, { Express, Request, Response, NextFunction } from 'express'
 import cors from 'cors'
 import Database from 'better-sqlite3'
 import { randomUUID } from 'crypto'
+import { z } from 'zod'
 import {
   BuildingRepository,
   UserRepository,
@@ -29,6 +30,21 @@ export interface ApiContext {
     draft: DraftRepository
   }
 }
+
+const DraftItemSchema = z.object({
+  menu_item_id: z.number().int().positive(),
+  name: z.string().min(1),
+  price: z.number().nonnegative(),
+  quantity: z.number().int().positive(),
+})
+
+const DraftPayloadSchema = z.object({
+  telegram_user_id: z.number().int(),
+  delivery_slot: z.string().min(1).nullable().optional(),
+  restaurant_id: z.number().int().positive().nullable().optional(),
+  building_id: z.number().int().positive().nullable().optional(),
+  items: z.array(DraftItemSchema),
+})
 
 const getRequestId = (res: Response): string => {
   const locals = res.locals as { requestId?: string }
@@ -446,28 +462,26 @@ export function createApiServer(db: Database.Database): Express {
   // PUT /api/draft - сохранить черновик (upsert по telegram_user_id)
   app.put('/api/draft', (req: Request, res: Response) => {
     try {
-      const { telegram_user_id, delivery_slot, restaurant_id, building_id, items } = req.body
-      if (!telegram_user_id) {
-        return res.status(400).json({ success: false, error: 'telegram_user_id is required' })
+      const parsed = DraftPayloadSchema.safeParse(req.body)
+      if (!parsed.success) {
+        logger.warn('Draft validation failed', { issues: parsed.error.issues })
+        return res.status(400).json({ success: false, error: 'Invalid draft payload' })
       }
-      const telegramUserId = parseInt(String(telegram_user_id))
-      if (!Number.isFinite(telegramUserId)) {
-        return res.status(400).json({ success: false, error: 'telegram_user_id must be a number' })
-      }
-      const itemsStr =
-        Array.isArray(items) ? JSON.stringify(items) : typeof items === 'string' ? items : '[]'
+
+      const { telegram_user_id, delivery_slot, restaurant_id, building_id, items } = parsed.data
+
       const draft = context.repos.draft.put({
-        telegram_user_id: telegramUserId,
+        telegram_user_id,
         delivery_slot: delivery_slot ?? null,
-        restaurant_id: restaurant_id != null ? parseInt(String(restaurant_id)) : null,
-        building_id: building_id != null ? parseInt(String(building_id)) : null,
-        items: itemsStr,
+        restaurant_id: restaurant_id ?? null,
+        building_id: building_id ?? null,
+        items: JSON.stringify(items),
       })
       res.json({
         success: true,
         data: {
           ...draft,
-          items: JSON.parse(draft.items),
+          items,
         },
       })
     } catch (error) {

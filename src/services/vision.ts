@@ -1,6 +1,7 @@
 import OpenAI from 'openai'
 import { MenuRecognitionResult } from '../types'
 import { MENU_CATEGORIES, detectCategory, isBreakfastDish } from '../db/constants'
+import { logger } from '../utils/logger'
 
 export class VisionService {
   private client: OpenAI
@@ -84,15 +85,17 @@ export class VisionService {
         throw new Error('Неверный формат ответа от GPT-4 Vision')
       }
 
-      // Постобработка: если категория не определена, используем автоопределение
-      result.items = result.items.map(item => ({
+      const items = result.items.map((item) => ({
         ...item,
-        category: item.category || detectCategory(item.name) || undefined
+        category: item.category || detectCategory(item.name) || undefined,
       }))
 
-      return result
+      return {
+        ...result,
+        items,
+      }
     } catch (error) {
-      console.error('Ошибка распознавания меню:', error)
+      logger.error('Ошибка распознавания меню', { error })
       throw new Error(
         'Не удалось распознать меню. Попробуйте другое фото или проверьте что на нём чётко видны названия блюд и цены.'
       )
@@ -157,7 +160,7 @@ export class VisionService {
       const result = JSON.parse(jsonMatch[0]) as { items: Array<{ name: string; category: string }> }
       return result.items || []
     } catch (error) {
-      console.error('Ошибка определения категорий через AI:', error)
+      logger.error('Ошибка определения категорий через AI', { error })
       // Fallback: используем автоопределение
       return items.map(item => ({
         name: item.name,
