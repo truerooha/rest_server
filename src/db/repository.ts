@@ -370,6 +370,7 @@ export class OrderRepository {
           AND building_id = ?
           AND restaurant_id = ?
           AND status IN ('confirmed', 'preparing', 'ready', 'delivered')
+          AND date(created_at) = date('now', 'localtime')
         ORDER BY created_at DESC
       `)
       .all(deliverySlot, buildingId, restaurantId) as Order[]
@@ -396,6 +397,7 @@ export class OrderRepository {
           AND restaurant_id = ?
           AND delivery_slot = ?
           AND status IN ('pending', 'confirmed', 'preparing', 'ready')
+          AND date(created_at) = date('now', 'localtime')
         ORDER BY created_at DESC
         LIMIT 1
       `,
