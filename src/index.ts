@@ -88,8 +88,9 @@ async function main() {
       logger.info('Запуск админ-бота...')
       const notifyUser =
         clientBot &&
-        ((telegramUserId: number, text: string) =>
-          clientBot!.api.sendMessage(telegramUserId, text))
+        (async (telegramUserId: number, text: string) => {
+          await clientBot!.api.sendMessage(telegramUserId, text)
+        })
       const adminBot = createAdminBot(config.botToken, db, visionService, {
         notifyUser: notifyUser ?? undefined,
       })
