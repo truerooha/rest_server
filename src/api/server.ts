@@ -555,6 +555,23 @@ export function createApiServer(db: Database.Database): Express {
         })
       }
 
+      // Защита от дубликатов: проверяем, нет ли уже активного заказа пользователя
+      // для этого же слота/здания/ресторана. Если есть — возвращаем понятную
+      // бизнес-ошибку, чтобы фронт не создавал несколько заказов на одно и то же.
+      const existingOrder = context.repos.order.findActiveByUserAndSlot(
+        Number(user_id),
+        Number(building_id),
+        Number(restaurant_id),
+        String(delivery_slot),
+      )
+
+      if (existingOrder) {
+        return res.status(400).json({
+          success: false,
+          error: 'user_order_already_exists_for_slot',
+        })
+      }
+
       const order = context.repos.order.create({
         user_id: Number(user_id),
         restaurant_id: Number(restaurant_id),

@@ -375,6 +375,34 @@ export class OrderRepository {
       .all(deliverySlot, buildingId, restaurantId) as Order[]
   }
 
+  /**
+   * Найти активный заказ пользователя для конкретного слота/здания/ресторана.
+   * Активные статусы: pending, confirmed, preparing, ready.
+   * Используется для предотвращения повторного создания одинаковых заказов
+   * при повторных нажатиях на кнопку подтверждения.
+   */
+  findActiveByUserAndSlot(
+    userId: number,
+    buildingId: number,
+    restaurantId: number,
+    deliverySlot: string,
+  ): Order | undefined {
+    return this.db
+      .prepare(
+        `
+        SELECT * FROM orders
+        WHERE user_id = ?
+          AND building_id = ?
+          AND restaurant_id = ?
+          AND delivery_slot = ?
+          AND status IN ('pending', 'confirmed', 'preparing', 'ready')
+        ORDER BY created_at DESC
+        LIMIT 1
+      `,
+      )
+      .get(userId, buildingId, restaurantId, deliverySlot) as Order | undefined
+  }
+
   updateStatus(id: number, status: OrderStatus): void {
     this.db
       .prepare('UPDATE orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
