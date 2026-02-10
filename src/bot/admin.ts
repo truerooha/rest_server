@@ -1,6 +1,7 @@
 import { Bot, Context, InlineKeyboard } from 'grammy'
 import { RestaurantRepository, MenuRepository, OrderRepository, UserRepository } from '../db/repository'
 import { CreditRepository } from '../db/repository-credits'
+import { DraftRepository } from '../db/repository-drafts'
 import { VisionService } from '../services/vision'
 import { MENU_CATEGORIES_ORDER, detectCategory, isBreakfastDish } from '../db/constants'
 import Database from 'better-sqlite3'
@@ -49,13 +50,14 @@ export function createBot(
   const orderRepo = new OrderRepository(db)
   const userRepo = new UserRepository(db)
   const creditRepo = new CreditRepository(db)
+  const draftRepo = new DraftRepository(db)
   const notifyUser = options?.notifyUser
 
   const userStates = new Map<number, UserState>()
+  const awaitingRestaurantName = new Set<number>()
 
-  // Команда /start
-  bot.command('start', async (ctx: Context) => {
-    await ctx.reply(
+  function getHelpText(): string {
+    return (
       `👋 Привет! Я помогу тебе создать цифровое меню для твоего ресторана.
 
 📸 Просто отправь мне фото своего меню, и я распознаю все блюда, цены и категории автоматически!
@@ -75,7 +77,24 @@ export function createBot(
 /edit - редактировать блюдо
 
 **Опасная зона:**
-/clearall - удалить ВСЕ данные из базы`,
+/clearall - удалить все данные вашего ресторана`
+    )
+  }
+
+  // Команда /start
+  bot.command('start', async (ctx: Context) => {
+    const chatId = ctx.chat?.id
+    if (!chatId) return
+
+    const restaurant = restaurantRepo.findByChatId(chatId)
+    if (restaurant) {
+      await ctx.reply(getHelpText(), { parse_mode: 'Markdown' })
+      return
+    }
+
+    awaitingRestaurantName.add(chatId)
+    await ctx.reply(
+      '👋 Привет! Как называется ваш ресторан?\n\n_Напишите короткое название — оно будет отображаться в приложении._',
       { parse_mode: 'Markdown' }
     )
   })
@@ -89,7 +108,7 @@ export function createBot(
     }
     const restaurant = restaurantRepo.findByChatId(chatId)
     if (!restaurant) {
-      await ctx.reply('❌ Ресторан не найден. Сначала отправьте фото меню или используйте /add.')
+      await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
       return
     }
     const orders = orderRepo.findActiveByRestaurantId(restaurant.id)
@@ -201,10 +220,11 @@ export function createBot(
       return
     }
 
-    const restaurant = restaurantRepo.findOrCreateByChatId(
-      chatId,
-      ctx.chat.title || 'Мой ресторан'
-    )
+    const restaurant = restaurantRepo.findByChatId(chatId)
+    if (!restaurant) {
+      await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
+      return
+    }
 
     // Сохраняем состояние диалога
     userStates.set(chatId, {
@@ -227,7 +247,10 @@ export function createBot(
     const chatId = ctx.chat?.id
     if (!chatId) return
 
-    if (userStates.has(chatId)) {
+    if (awaitingRestaurantName.has(chatId)) {
+      awaitingRestaurantName.delete(chatId)
+      await ctx.reply('Отменено. Напишите /start когда будете готовы.')
+    } else if (userStates.has(chatId)) {
       userStates.delete(chatId)
       await ctx.reply('❌ Операция отменена')
     } else {
@@ -245,7 +268,7 @@ export function createBot(
 
     const restaurant = restaurantRepo.findByChatId(chatId)
     if (!restaurant) {
-      await ctx.reply('У вас ещё нет меню. Отправьте фото меню или добавьте блюдо через /add')
+      await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
       return
     }
 
@@ -294,7 +317,7 @@ export function createBot(
 
     const restaurant = restaurantRepo.findByChatId(chatId)
     if (!restaurant) {
-      await ctx.reply('У вас ещё нет меню. Отправьте фото меню или добавьте блюдо через /add')
+      await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
       return
     }
 
@@ -343,7 +366,7 @@ export function createBot(
 
     const restaurant = restaurantRepo.findByChatId(chatId)
     if (!restaurant) {
-      await ctx.reply('У вас ещё нет меню. Отправьте фото меню или добавьте блюдо через /add')
+      await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
       return
     }
 
@@ -680,47 +703,44 @@ export function createBot(
         await ctx.answerCallbackQuery('Отменено')
       }
       
-      // Подтверждение удаления всех данных
+      // Подтверждение удаления данных текущего ресторана
       else if (data === 'confirm_clearall') {
-        try {
-          // Оборачиваем в транзакцию
-          const deleteTransaction = db.transaction(() => {
-            // Игнорируем ошибки отсутствия таблиц (если миграция не прошла)
-            const safeDelete = (table: string) => {
-              try {
-                db.prepare(`DELETE FROM ${table}`).run()
-              } catch (e) {
-                // Игнорируем ошибку "no such table", но пробрасываем остальные
-                if (e instanceof Error && !e.message.includes('no such table')) {
-                  throw e
-                }
-              }
-            }
+        const chatIdForCallback =
+          ctx.callbackQuery?.message && 'chat' in ctx.callbackQuery.message
+            ? ctx.callbackQuery.message.chat.id
+            : ctx.chat?.id
 
-            // Удаляем данные в правильном порядке
-            safeDelete('orders')
-            safeDelete('menu_items')
-            safeDelete('restaurant_buildings')
-            safeDelete('users')
-            safeDelete('buildings')
-            safeDelete('restaurants')
+        const restaurant = chatIdForCallback ? restaurantRepo.findByChatId(chatIdForCallback) : null
+        if (!restaurant) {
+          await ctx.editMessageText('❌ Ресторан не найден. Возможно, он уже удалён.')
+          await ctx.answerCallbackQuery('Ресторан не найден')
+          return
+        }
+
+        try {
+          const restaurantId = restaurant.id
+          const deleteTransaction = db.transaction(() => {
+            // Удаляем в порядке учёта FK
+            db.prepare('DELETE FROM orders WHERE restaurant_id = ?').run(restaurantId)
+            db.prepare('DELETE FROM menu_items WHERE restaurant_id = ?').run(restaurantId)
+            db.prepare('DELETE FROM restaurant_buildings WHERE restaurant_id = ?').run(restaurantId)
+            db.prepare('UPDATE user_drafts SET restaurant_id = NULL, items = ? WHERE restaurant_id = ?').run('[]', restaurantId)
+            db.prepare('DELETE FROM restaurants WHERE id = ?').run(restaurantId)
           })
 
           deleteTransaction()
 
           await ctx.editMessageText(
-            '✅ <b>Все данные удалены</b>\n\n' +
-            'База данных полностью очищена.\n\n' +
-            'Отправьте фото меню, чтобы начать заново.',
+            '✅ <b>Данные ресторана удалены</b>\n\n' +
+            'Отправьте /start чтобы создать новый ресторан и начать заново.',
             { parse_mode: 'HTML' }
           )
 
-          await ctx.answerCallbackQuery('Все данные удалены!')
+          await ctx.answerCallbackQuery('Данные удалены!')
         } catch (error) {
-          console.error('Ошибка при очистке базы:', error)
-          // Отправляем пользователю детали ошибки для отладки
+          const err = error instanceof Error ? error.message : String(error)
           await ctx.editMessageText(
-            `❌ Произошла ошибка при удалении данных:\n\n<code>${error instanceof Error ? error.message : String(error)}</code>`,
+            `❌ Ошибка при удалении: <code>${err}</code>`,
             { parse_mode: 'HTML' }
           )
           await ctx.answerCallbackQuery('Ошибка!')
@@ -773,11 +793,11 @@ export function createBot(
       // Обогащаем данные категориями и признаком завтрака
       const enrichedItems = visionService.enrichMenuItems(result.items)
 
-      // Сохраняем или находим ресторан (всегда используем "Грамм")
-      const restaurant = restaurantRepo.findOrCreateByChatId(
-        chatId,
-        'Грамм'
-      )
+      const restaurant = restaurantRepo.findByChatId(chatId)
+      if (!restaurant) {
+        await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
+        return
+      }
 
       // Удаляем старое меню (если есть) и сохраняем новое
       menuRepo.deleteAllByRestaurantId(restaurant.id)
@@ -849,7 +869,7 @@ export function createBot(
       const restaurant = restaurantRepo.findByChatId(chatId)
       if (!restaurant) {
         console.log('⚠️  Ресторан не найден для chat ID:', chatId)
-        await ctx.reply('У вас ещё нет меню. Отправьте фото меню для распознавания!')
+        await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
         return
       }
       
@@ -925,7 +945,7 @@ export function createBot(
 
       const restaurant = restaurantRepo.findByChatId(chatId)
       if (!restaurant) {
-        await ctx.reply('У вас ещё нет меню. Отправьте фото меню!')
+        await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
         return
       }
 
@@ -981,7 +1001,7 @@ export function createBot(
 
       const restaurant = restaurantRepo.findByChatId(chatId)
       if (!restaurant) {
-        await ctx.reply('У вас ещё нет меню. Отправьте фото меню!')
+        await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
         return
       }
 
@@ -1017,7 +1037,7 @@ export function createBot(
     }
   })
 
-  // Команда /clearall - удалить все данные из базы (ОПАСНАЯ ОПЕРАЦИЯ!)
+  // Команда /clearall - удалить все данные ТЕКУЩЕГО ресторана
   bot.command('clearall', async (ctx: Context) => {
     const chatId = ctx.chat?.id
     if (!chatId) {
@@ -1025,19 +1045,25 @@ export function createBot(
       return
     }
 
+    const restaurant = restaurantRepo.findByChatId(chatId)
+    if (!restaurant) {
+      await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
+      return
+    }
+
     const keyboard = new InlineKeyboard()
-      .text('⚠️ ДА, УДАЛИТЬ ВСЁ', 'confirm_clearall')
+      .text('⚠️ ДА, УДАЛИТЬ', 'confirm_clearall')
       .text('❌ Отмена', 'cancel_clearall')
 
     await ctx.reply(
-      '🚨 <b>ВНИМАНИЕ! ОПАСНАЯ ОПЕРАЦИЯ!</b>\n\n' +
-      'Вы собираетесь удалить ВСЕ данные из базы:\n' +
+      `🚨 <b>ВНИМАНИЕ!</b>\n\n` +
+      `Вы собираетесь удалить все данные ресторана «${restaurant.name}»:\n` +
       '• Все блюда из меню\n' +
-      '• Все рестораны\n' +
-      '• Все здания\n' +
-      '• Всех пользователей\n' +
-      '• Все заказы\n\n' +
+      '• Все заказы\n' +
+      '• Связи со зданиями\n' +
+      '• Черновики заказов клиентов\n\n' +
       '⚠️ <b>Это действие НЕОБРАТИМО!</b>\n\n' +
+      'Данные других ресторанов не затрагиваются.\n\n' +
       'Вы уверены?',
       {
         parse_mode: 'HTML',
@@ -1052,6 +1078,22 @@ export function createBot(
     const text = ctx.message?.text
 
     if (!chatId || !text) return
+
+    // Ожидание названия ресторана при первом /start
+    if (awaitingRestaurantName.has(chatId)) {
+      const name = text.trim()
+      if (name.length === 0 || name.length > 100) {
+        await ctx.reply('Введите короткое название ресторана (до 100 символов).')
+        return
+      }
+      awaitingRestaurantName.delete(chatId)
+      restaurantRepo.findOrCreateByChatId(chatId, name)
+      await ctx.reply(
+        `✅ Ресторан «${name}» создан!\n\n` + getHelpText(),
+        { parse_mode: 'Markdown' }
+      )
+      return
+    }
 
     // Проверяем, есть ли активный диалог
     const state = userStates.get(chatId)
