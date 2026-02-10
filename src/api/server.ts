@@ -528,6 +528,49 @@ export function createApiServer(db: Database.Database): Express {
     }
   })
 
+  // GET /api/users/by-telegram/:telegramId/active-order - активный заказ пользователя (по telegram_user_id)
+  app.get('/api/users/by-telegram/:telegramId/active-order', (req: Request, res: Response) => {
+    try {
+      const telegramId = parseInt(String(req.params.telegramId))
+      const deliverySlot = String(req.query.deliverySlot || '')
+      const buildingId = req.query.buildingId ? parseInt(String(req.query.buildingId)) : null
+      const restaurantId = req.query.restaurantId ? parseInt(String(req.query.restaurantId)) : null
+
+      if (!Number.isFinite(telegramId) || !deliverySlot || !buildingId || !restaurantId) {
+        return res.status(400).json({
+          success: false,
+          error: 'telegramId, deliverySlot, buildingId, and restaurantId are required',
+        })
+      }
+
+      const user = context.repos.user.findByTelegramId(telegramId)
+      if (!user) {
+        return res.status(404).json({ success: false, error: 'User not found' })
+      }
+
+      const order = context.repos.order.findActiveByUserAndSlot(
+        user.id,
+        buildingId,
+        restaurantId,
+        deliverySlot,
+      )
+
+      if (!order || !['confirmed', 'preparing', 'ready'].includes(order.status)) {
+        return res.json({ success: true, data: null })
+      }
+
+      const parsed = {
+        ...order,
+        items: JSON.parse(order.items),
+      }
+
+      res.json({ success: true, data: parsed })
+    } catch (error) {
+      logApiError(res, 'Error fetching active order by telegram id', error)
+      res.status(500).json({ success: false, error: 'Failed to fetch active order' })
+    }
+  })
+
   // GET /api/users/:userId/active-order - получить активный заказ пользователя для слота/здания/ресторана
   app.get('/api/users/:userId/active-order', (req: Request, res: Response) => {
     try {
