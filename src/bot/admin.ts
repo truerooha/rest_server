@@ -136,7 +136,7 @@ export function createBot(
   }
 
   function getMainKeyboard(): Keyboard {
-    return new Keyboard().text('📋 Команды').resize().persistent()
+    return new Keyboard().text('📋 Команды').resized().persistent()
   }
 
   // Кнопка «Команды» — всегда показывает справку
