@@ -723,7 +723,7 @@ export function createApiServer(db: Database.Database): Express {
     }
   })
 
-  // POST /api/orders/:id/pay - оплатить заказ (Variant A: списание credits, статус confirmed)
+  // POST /api/orders/:id/pay — [ВРЕМЕННАЯ ЗАГЛУШКА] без оплаты, без проверки кредитов (см. STATUS.md)
   app.post('/api/orders/:id/pay', (req: Request, res: Response) => {
     try {
       const orderId = parseInt(String(req.params.id))
@@ -746,26 +746,7 @@ export function createApiServer(db: Database.Database): Express {
       if (order.user_id !== user.id) {
         return res.status(403).json({ success: false, error: 'Not your order' })
       }
-      if (order.status !== 'pending') {
-        return res.status(400).json({
-          success: false,
-          error: 'Order already paid or cancelled',
-        })
-      }
-      const amount = order.total_price
-      try {
-        context.repos.credit.adjustBalance(
-          user.id,
-          -amount,
-          'spend',
-          'Оплата заказа',
-          orderId,
-        )
-      } catch (creditError) {
-        const msg = creditError instanceof Error ? creditError.message : 'Insufficient credits'
-        return res.status(400).json({ success: false, error: msg })
-      }
-      context.repos.order.updateStatus(orderId, 'confirmed')
+      // [ВРЕМЕННО] Заглушка: заказ остаётся pending, кредиты не списываются
       const updated = context.repos.order.findById(orderId)!
       res.json({
         success: true,
@@ -786,7 +767,7 @@ export function createApiServer(db: Database.Database): Express {
       const orderId = parseInt(String(req.params.id))
       const { status } = req.body
 
-      const validStatuses = ['pending', 'confirmed', 'preparing', 'ready', 'delivered', 'cancelled']
+      const validStatuses = ['pending', 'confirmed', 'restaurant_confirmed', 'preparing', 'ready', 'delivered', 'cancelled']
       if (!status || !validStatuses.includes(status)) {
         return res.status(400).json({
           success: false,

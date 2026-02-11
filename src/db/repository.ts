@@ -1,5 +1,16 @@
 import Database from 'better-sqlite3'
-import { Restaurant, MenuItem, Building, User, Order, OrderItem, RestaurantBuilding, OrderStatus } from '../types'
+import {
+  Restaurant,
+  MenuItem,
+  Building,
+  User,
+  Order,
+  OrderItem,
+  RestaurantBuilding,
+  OrderStatus,
+  GroupOrder,
+  GroupOrderStatus,
+} from '../types'
 
 export class RestaurantRepository {
   constructor(private db: Database.Database) {}
@@ -369,11 +380,38 @@ export class OrderRepository {
         WHERE delivery_slot = ?
           AND building_id = ?
           AND restaurant_id = ?
-          AND status IN ('confirmed', 'preparing', 'ready', 'delivered')
+          AND status IN ('pending', 'restaurant_confirmed', 'preparing', 'ready', 'delivered')
           AND date(created_at) = date('now', 'localtime')
         ORDER BY created_at DESC
       `)
       .all(deliverySlot, buildingId, restaurantId) as Order[]
+  }
+
+  /** Заказы для агрегации при дедлайне: pending по слоту/зданию/ресторану на дату [ВРЕМЕННО без оплаты] */
+  findPendingForGroup(
+    deliverySlot: string,
+    buildingId: number,
+    restaurantId: number,
+    orderDate: string,
+  ): Order[] {
+    return this.db
+      .prepare(`
+        SELECT * FROM orders
+        WHERE delivery_slot = ?
+          AND building_id = ?
+          AND restaurant_id = ?
+          AND status = 'pending'
+          AND date(created_at) = ?
+        ORDER BY created_at DESC
+      `)
+      .all(deliverySlot, buildingId, restaurantId, orderDate) as Order[]
+  }
+
+  updateStatusBatch(orderIds: number[], status: OrderStatus): void {
+    const stmt = this.db.prepare('UPDATE orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    for (const id of orderIds) {
+      stmt.run(status, id)
+    }
   }
 
   /**
@@ -396,7 +434,7 @@ export class OrderRepository {
           AND building_id = ?
           AND restaurant_id = ?
           AND delivery_slot = ?
-          AND status IN ('pending', 'confirmed', 'preparing', 'ready')
+          AND status IN ('pending', 'confirmed', 'restaurant_confirmed', 'preparing', 'ready')
           AND date(created_at) = date('now', 'localtime')
         ORDER BY created_at DESC
         LIMIT 1
@@ -427,6 +465,55 @@ export class OrderRepository {
         ORDER BY created_at DESC
       `)
       .all(restaurantId) as Order[]
+  }
+}
+
+export class GroupOrderRepository {
+  constructor(private db: Database.Database) {}
+
+  create(data: Omit<GroupOrder, 'id' | 'created_at'>): GroupOrder {
+    const result = this.db
+      .prepare(
+        `
+        INSERT INTO group_orders (restaurant_id, building_id, delivery_slot, order_date, status)
+        VALUES (?, ?, ?, ?, ?)
+      `,
+      )
+      .run(data.restaurant_id, data.building_id, data.delivery_slot, data.order_date, data.status)
+    return {
+      ...data,
+      id: result.lastInsertRowid as number,
+      created_at: new Date().toISOString(),
+    }
+  }
+
+  findById(id: number): GroupOrder | undefined {
+    return this.db.prepare('SELECT * FROM group_orders WHERE id = ?').get(id) as GroupOrder | undefined
+  }
+
+  findByRestaurantAndSlot(
+    restaurantId: number,
+    buildingId: number,
+    deliverySlot: string,
+    orderDate: string,
+  ): GroupOrder | undefined {
+    return this.db
+      .prepare(
+        'SELECT * FROM group_orders WHERE restaurant_id = ? AND building_id = ? AND delivery_slot = ? AND order_date = ?',
+      )
+      .get(restaurantId, buildingId, deliverySlot, orderDate) as GroupOrder | undefined
+  }
+
+  findPendingByRestaurant(restaurantId: number): GroupOrder[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM group_orders WHERE restaurant_id = ? AND status = 'pending_restaurant' ORDER BY created_at DESC`,
+      )
+      .all(restaurantId) as GroupOrder[]
+  }
+
+  updateStatus(id: number, status: GroupOrderStatus): void {
+    this.db.prepare('UPDATE group_orders SET status = ? WHERE id = ?').run(status, id)
   }
 }
 

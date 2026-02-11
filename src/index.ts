@@ -2,9 +2,11 @@ import { config } from './utils/config'
 import { initDatabase } from './db/schema'
 import { applyMigrations } from './db/migrations/migrate'
 import { VisionService } from './services/vision'
-import { createBot as createAdminBot } from './bot/admin'
+import { createBot as createAdminBot, formatGroupOrderMessage } from './bot/admin'
 import { createClientBot } from './bot/client'
 import { createApiServer } from './api/server'
+import { startDeadlineScheduler } from './services/deadline-scheduler'
+import { UserRepository } from './db/repository'
 import { logger } from './utils/logger'
 
 async function main() {
@@ -49,6 +51,8 @@ async function main() {
     process.exit(1)
   })
 
+  let stopDeadlineScheduler: (() => void) | null = null
+
   // Graceful shutdown
   let shuttingDown = false
   const shutdown = (signal: string) => {
@@ -57,6 +61,7 @@ async function main() {
     }
     shuttingDown = true
     logger.warn('Получен сигнал завершения', { signal })
+    stopDeadlineScheduler?.()
     server.close(() => {
       db.close()
       logger.info('Сервер остановлен')
@@ -93,6 +98,20 @@ async function main() {
         })
       const adminBot = createAdminBot(config.botToken, db, visionService, {
         notifyUser: notifyUser ?? undefined,
+      })
+      const userRepo = new UserRepository(db)
+      stopDeadlineScheduler = startDeadlineScheduler(db, async (params) => {
+        const ordersWithNames = params.orders.map((o) => ({
+          ...o,
+          userName: userRepo.findById(o.userId)?.first_name ?? userRepo.findById(o.userId)?.username,
+        }))
+        const { text, keyboard } = formatGroupOrderMessage({
+          ...params,
+          orders: ordersWithNames,
+        })
+        await adminBot.api.sendMessage(params.restaurantChatId, text, {
+          reply_markup: keyboard,
+        })
       })
       adminBot.catch((err) => {
         logger.error('Ошибка в админ-боте', { error: err })

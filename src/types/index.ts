@@ -50,7 +50,19 @@ export interface Order {
   updated_at: string
 }
 
-export type OrderStatus = 'pending' | 'confirmed' | 'preparing' | 'ready' | 'delivered' | 'cancelled'
+export type OrderStatus = 'pending' | 'confirmed' | 'restaurant_confirmed' | 'preparing' | 'ready' | 'delivered' | 'cancelled'
+
+export type GroupOrderStatus = 'pending_restaurant' | 'accepted' | 'rejected'
+
+export interface GroupOrder {
+  id: number
+  restaurant_id: number
+  building_id: number
+  delivery_slot: string
+  order_date: string
+  status: GroupOrderStatus
+  created_at: string
+}
 
 export interface OrderItem {
   id: number

@@ -1,5 +1,12 @@
 import { Bot, Context, InlineKeyboard } from 'grammy'
-import { RestaurantRepository, MenuRepository, OrderRepository, UserRepository } from '../db/repository'
+import {
+  RestaurantRepository,
+  MenuRepository,
+  OrderRepository,
+  UserRepository,
+  GroupOrderRepository,
+  BuildingRepository,
+} from '../db/repository'
 import { CreditRepository } from '../db/repository-credits'
 import { DraftRepository } from '../db/repository-drafts'
 import { VisionService } from '../services/vision'
@@ -9,6 +16,48 @@ import Database from 'better-sqlite3'
 
 export type AdminBotOptions = {
   notifyUser?: (telegramUserId: number, text: string) => Promise<void>
+}
+
+export type GroupOrderMessageParams = {
+  restaurantName: string
+  buildingName: string
+  deliverySlot: string
+  groupOrderId: number
+  orders: Array<{
+    id: number
+    userId: number
+    totalPrice: number
+    items: string
+    userName?: string
+  }>
+  totalAmount: number
+  participantCount: number
+}
+
+/** Формирует текст и клавиатуру для сообщения о групповом заказе */
+export function formatGroupOrderMessage(params: GroupOrderMessageParams): { text: string; keyboard: InlineKeyboard } {
+  const { restaurantName, buildingName, deliverySlot, groupOrderId, orders, totalAmount, participantCount } = params
+  const lines: string[] = [
+    `📦 Общий заказ`,
+    `Ресторан: ${restaurantName}`,
+    `Здание: ${buildingName}`,
+    `Слот: ${deliverySlot}`,
+    `Участников: ${participantCount}`,
+    `Сумма: ${totalAmount} ₽`,
+    ``,
+  ]
+  for (const order of orders) {
+    const userName = order.userName ?? `#${order.id}`
+    const items = JSON.parse(order.items) as Array<{ name: string; price: number; quantity: number }>
+    const orderLines = items.map((i) => `    • ${i.name} × ${i.quantity} — ${i.price * i.quantity} ₽`)
+    lines.push(`👤 ${userName} (${order.totalPrice} ₽):`)
+    lines.push(...orderLines)
+    lines.push('')
+  }
+  const keyboard = new InlineKeyboard()
+    .text('✅ Принять', `group:${groupOrderId}:accept`)
+    .text('❌ Отклонить', `group:${groupOrderId}:reject`)
+  return { text: lines.join('\n'), keyboard }
 }
 
 // Функция для экранирования HTML спецсимволов
@@ -52,6 +101,8 @@ export function createBot(
   const userRepo = new UserRepository(db)
   const creditRepo = new CreditRepository(db)
   const draftRepo = new DraftRepository(db)
+  const groupOrderRepo = new GroupOrderRepository(db)
+  const buildingRepo = new BuildingRepository(db)
   const notifyUser = options?.notifyUser
 
   const userStates = new Map<number, UserState>()
@@ -102,7 +153,7 @@ export function createBot(
     )
   })
 
-  // Команда /orders - список заказов ресторана с кнопками Принять / Готово / Отменить
+  // Команда /orders - список заказов: сначала групповые на подтверждении, затем индивидуальные
   bot.command('orders', async (ctx: Context) => {
     const chatId = ctx.chat?.id
     if (!chatId) {
@@ -114,12 +165,49 @@ export function createBot(
       await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
       return
     }
-    const orders = orderRepo.findActiveByRestaurantId(restaurant.id)
-    if (orders.length === 0) {
-      await ctx.reply('📋 Нет активных заказов.')
-      return
+    let hasAny = false
+    const pendingGroups = groupOrderRepo.findPendingByRestaurant(restaurant.id)
+    for (const group of pendingGroups) {
+      const building = buildingRepo.findById(group.building_id)
+      const orders = orderRepo.findPendingForGroup(
+        group.delivery_slot,
+        group.building_id,
+        group.restaurant_id,
+        group.order_date,
+      )
+      if (orders.length === 0) continue
+      hasAny = true
+      const totalAmount = orders.reduce((s, o) => s + o.total_price, 0)
+      const { text, keyboard } = formatGroupOrderMessage({
+        restaurantName: restaurant.name,
+        buildingName: building?.name ?? '',
+        deliverySlot: group.delivery_slot,
+        groupOrderId: group.id,
+        orders: orders.map((o) => {
+          const user = userRepo.findById(o.user_id)
+          return {
+            id: o.id,
+            userId: o.user_id,
+            totalPrice: o.total_price,
+            items: o.items,
+            userName: user?.first_name || user?.username || undefined,
+          }
+        }),
+        totalAmount,
+        participantCount: orders.length,
+      })
+      await ctx.reply(text, { reply_markup: keyboard })
     }
-    for (const order of orders) {
+    const individualOrders = orderRepo.findActiveByRestaurantId(restaurant.id).filter((o) => {
+      const group = groupOrderRepo.findByRestaurantAndSlot(
+        o.restaurant_id,
+        o.building_id,
+        o.delivery_slot,
+        o.created_at.split('T')[0],
+      )
+      return !group || group.status !== 'pending_restaurant'
+    })
+    for (const order of individualOrders) {
       const items = JSON.parse(order.items) as Array<{ name: string; price: number; quantity: number }>
       const lines = items.map((i) => `  • ${i.name} × ${i.quantity} — ${i.price * i.quantity} ₽`)
       const text = `📦 Заказ #${order.id}\nСлот: ${order.delivery_slot}\nСумма: ${order.total_price} ₽\nСтатус: ${order.status}\n\n${lines.join('\n')}`
@@ -127,20 +215,99 @@ export function createBot(
       if (order.status === 'confirmed') {
         keyboard.text('✅ Принять', `order:${order.id}:accept`).text('❌ Отменить', `order:${order.id}:cancel`).row()
       }
-      if (order.status === 'confirmed' || order.status === 'preparing') {
+      if (order.status === 'confirmed' || order.status === 'restaurant_confirmed' || order.status === 'preparing') {
         keyboard.text('🍽️ Готово', `order:${order.id}:ready`)
       }
-      await ctx.reply(text, {
-        reply_markup: keyboard,
-      })
+      await ctx.reply(text, { reply_markup: keyboard })
+      hasAny = true
+    }
+    if (!hasAny) {
+      await ctx.reply('📋 Нет активных заказов.')
     }
   })
 
-  // Обработка кнопок заказа: Принять / Готово / Отменить
+  // Обработка кнопок группового заказа: Принять / Отклонить
   bot.on('callback_query', async (ctx: Context, next: () => Promise<void>) => {
     const data = ctx.callbackQuery?.data
+    if (!data || !data.startsWith('group:')) {
+      return handleOrderCallback(ctx, next)
+    }
+    const parts = data.split(':')
+    if (parts.length < 3) {
+      await ctx.answerCallbackQuery()
+      return
+    }
+    const groupId = parseInt(parts[1], 10)
+    const action = parts[2]
+    if (!Number.isFinite(groupId) || !['accept', 'reject'].includes(action)) {
+      await ctx.answerCallbackQuery()
+      return
+    }
+    const chatId =
+      ctx.callbackQuery?.message && 'chat' in ctx.callbackQuery.message
+        ? ctx.callbackQuery.message.chat.id
+        : ctx.chat?.id
+    if (!chatId) {
+      await ctx.answerCallbackQuery()
+      return
+    }
+    const restaurant = restaurantRepo.findByChatId(chatId)
+    if (!restaurant) {
+      await ctx.answerCallbackQuery({ text: 'Ресторан не найден' })
+      return
+    }
+    const groupOrder = groupOrderRepo.findById(groupId)
+    if (!groupOrder || groupOrder.restaurant_id !== restaurant.id || groupOrder.status !== 'pending_restaurant') {
+      await ctx.answerCallbackQuery({ text: 'Заказ уже обработан или не найден' })
+      return
+    }
+    const orders = orderRepo.findPendingForGroup(
+      groupOrder.delivery_slot,
+      groupOrder.building_id,
+      groupOrder.restaurant_id,
+      groupOrder.order_date,
+    )
+    if (orders.length === 0) {
+      await ctx.answerCallbackQuery({ text: 'Заказы не найдены' })
+      return
+    }
+    if (action === 'accept') {
+      groupOrderRepo.updateStatus(groupId, 'accepted')
+      orderRepo.updateStatusBatch(orders.map((o) => o.id), 'restaurant_confirmed')
+      await ctx.answerCallbackQuery({ text: 'Заказ принят' })
+      for (const order of orders) {
+        const user = userRepo.findById(order.user_id)
+        if (notifyUser && user) {
+          await notifyUser(user.telegram_user_id, '✅ Ваш заказ подтверждён рестораном.')
+        }
+      }
+    } else {
+      groupOrderRepo.updateStatus(groupId, 'rejected')
+      for (const order of orders) {
+        // [ВРЕМЕННО] pending не оплачен — refund не нужен
+        if (order.status !== 'pending') {
+          try {
+            creditRepo.adjustBalance(order.user_id, order.total_price, 'refund', 'Отмена общего заказа рестораном', order.id)
+          } catch {
+            // ignore refund errors
+          }
+        }
+        orderRepo.updateStatus(order.id, 'cancelled')
+      }
+      await ctx.answerCallbackQuery({ text: 'Заказ отклонён' })
+      for (const order of orders) {
+        const user = userRepo.findById(order.user_id)
+        if (notifyUser && user) {
+          await notifyUser(user.telegram_user_id, '❌ Общий заказ отклонён рестораном.')
+        }
+      }
+    }
+  })
+
+  async function handleOrderCallback(ctx: Context, next: () => Promise<void>): Promise<void> {
+    const data = ctx.callbackQuery?.data
     if (!data || !data.startsWith('order:')) {
-      return next() // Передаём следующему обработчику (confirm_clearall, wipeall и т.д.)
+      return next()
     }
     const parts = data.split(':')
     if (parts.length < 3) {
@@ -185,7 +352,7 @@ export function createBot(
         await notifyUser(telegramUserId, '✅ Ваш заказ принят в работу.')
       }
     } else if (action === 'ready') {
-      if (order.status !== 'confirmed' && order.status !== 'preparing') {
+      if (order.status !== 'confirmed' && order.status !== 'restaurant_confirmed' && order.status !== 'preparing') {
         await ctx.answerCallbackQuery({ text: 'Заказ уже обработан' })
         return
       }
