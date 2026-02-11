@@ -379,7 +379,7 @@ export function createBot(
         await notifyUser(telegramUserId, '❌ Заказ отменён рестораном.')
       }
     }
-  })
+  }
 
   // Команда /add - добавить блюдо вручную
   bot.command('add', async (ctx: Context) => {
