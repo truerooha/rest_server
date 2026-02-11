@@ -116,6 +116,17 @@ async function main() {
       adminBot.catch((err) => {
         logger.error('Ошибка в админ-боте', { error: err })
       })
+      // Кнопка меню (рядом с полем ввода) — всегда видна, открывает список команд
+      await adminBot.api.setChatMenuButton({ menu_button: { type: 'commands' } })
+      await adminBot.api.setMyCommands([
+        { command: 'start', description: 'Начать / приветствие' },
+        { command: 'help', description: 'Справка по командам' },
+        { command: 'orders', description: 'Список заказов' },
+        { command: 'menu', description: 'Меню по категориям' },
+        { command: 'add', description: 'Добавить блюдо' },
+        { command: 'edit', description: 'Редактировать блюдо' },
+        { command: 'delete', description: 'Удалить блюдо' },
+      ])
       adminBot.start()
         .then(() => {
           logger.info('Админ-бот запущен')
