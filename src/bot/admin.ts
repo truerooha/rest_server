@@ -1,4 +1,4 @@
-import { Bot, Context, InlineKeyboard } from 'grammy'
+import { Bot, Context, InlineKeyboard, Keyboard } from 'grammy'
 import {
   RestaurantRepository,
   MenuRepository,
@@ -135,14 +135,36 @@ export function createBot(
     )
   }
 
-  // Команда /start
+  function getMainKeyboard(): Keyboard {
+    return new Keyboard().text('📋 Команды').resize().persistent()
+  }
+
+  // Кнопка «Команды» — всегда показывает справку
+  bot.hears('📋 Команды', async (ctx: Context) => {
+    const chatId = ctx.chat?.id
+    if (!chatId) return
+    const restaurant = restaurantRepo.findByChatId(chatId)
+    if (!restaurant) {
+      await ctx.reply('❌ Ресторан не найден. Отправьте /start и укажите название ресторана.')
+      return
+    }
+    await ctx.reply(getHelpText(), {
+      parse_mode: 'Markdown',
+      reply_markup: getMainKeyboard(),
+    })
+  })
+
+  // Команда /start — всегда показывает приветствие
   bot.command('start', async (ctx: Context) => {
     const chatId = ctx.chat?.id
     if (!chatId) return
 
     const restaurant = restaurantRepo.findByChatId(chatId)
     if (restaurant) {
-      await ctx.reply(getHelpText(), { parse_mode: 'Markdown' })
+      await ctx.reply(getHelpText(), {
+        parse_mode: 'Markdown',
+        reply_markup: getMainKeyboard(),
+      })
       return
     }
 
@@ -151,6 +173,21 @@ export function createBot(
       '👋 Привет! Как называется ваш ресторан?\n\n_Напишите короткое название — оно будет отображаться в приложении._',
       { parse_mode: 'Markdown' }
     )
+  })
+
+  // /help — дублирует start для быстрого доступа к справке
+  bot.command('help', async (ctx: Context) => {
+    const chatId = ctx.chat?.id
+    if (!chatId) return
+    const restaurant = restaurantRepo.findByChatId(chatId)
+    if (!restaurant) {
+      await ctx.reply('❌ Ресторан не найден. Отправьте /start и укажите название ресторана.')
+      return
+    }
+    await ctx.reply(getHelpText(), {
+      parse_mode: 'Markdown',
+      reply_markup: getMainKeyboard(),
+    })
   })
 
   // Команда /orders - список заказов: сначала групповые на подтверждении, затем индивидуальные
@@ -1343,11 +1380,18 @@ export function createBot(
   })
 
   // Обработка текстовых сообщений для диалогов
-  bot.on('message:text', async (ctx: Context) => {
+  bot.on('message:text', async (ctx: Context, next: () => Promise<void>) => {
     const chatId = ctx.chat?.id
     const text = ctx.message?.text
 
     if (!chatId || !text) return
+
+    // Команды (/start, /help и др.) передаём command-обработчикам
+    const isCommand = ctx.message?.entities?.some((e) => e.type === 'bot_command') ?? text.startsWith('/')
+    if (isCommand) {
+      await next()
+      return
+    }
 
     // Ожидание названия ресторана при первом /start
     if (awaitingRestaurantName.has(chatId)) {
@@ -1358,10 +1402,10 @@ export function createBot(
       }
       awaitingRestaurantName.delete(chatId)
       restaurantRepo.findOrCreateByChatId(chatId, name)
-      await ctx.reply(
-        `✅ Ресторан «${name}» создан!\n\n` + getHelpText(),
-        { parse_mode: 'Markdown' }
-      )
+      await ctx.reply(`✅ Ресторан «${name}» создан!\n\n` + getHelpText(), {
+        parse_mode: 'Markdown',
+        reply_markup: getMainKeyboard(),
+      })
       return
     }
 
