@@ -38,7 +38,7 @@ export type GroupOrderMessageParams = {
 export function formatGroupOrderMessage(params: GroupOrderMessageParams): { text: string; keyboard: InlineKeyboard } {
   const { restaurantName, buildingName, deliverySlot, groupOrderId, orders, totalAmount, participantCount } = params
   const lines: string[] = [
-    `📦 Общий заказ`,
+    `📦 Заказ`,
     `Ресторан: ${restaurantName}`,
     `Здание: ${buildingName}`,
     `Слот: ${deliverySlot}`,
@@ -46,14 +46,14 @@ export function formatGroupOrderMessage(params: GroupOrderMessageParams): { text
     `Сумма: ${totalAmount} ₽`,
     ``,
   ]
-  for (const order of orders) {
-    const userName = order.userName ?? `#${order.id}`
+  orders.forEach((order, i) => {
+    const userName = `Клиент ${i + 1}`
     const items = JSON.parse(order.items) as Array<{ name: string; price: number; quantity: number }>
     const orderLines = items.map((i) => `    • ${i.name} × ${i.quantity} — ${i.price * i.quantity} ₽`)
     lines.push(`👤 ${userName} (${order.totalPrice} ₽):`)
     lines.push(...orderLines)
     lines.push('')
-  }
+  })
   const keyboard = new InlineKeyboard()
     .text('✅ Принять', `group:${groupOrderId}:accept`)
     .text('❌ Отклонить', `group:${groupOrderId}:reject`)
@@ -313,6 +313,14 @@ export function createBot(
       groupOrderRepo.updateStatus(groupId, 'accepted')
       orderRepo.updateStatusBatch(orders.map((o) => o.id), 'restaurant_confirmed')
       await ctx.answerCallbackQuery({ text: 'Заказ принят' })
+      try {
+        const msg = ctx.callbackQuery?.message
+        if (msg && 'message_id' in msg) {
+          await ctx.api.editMessageReplyMarkup(chatId, msg.message_id, { reply_markup: { inline_keyboard: [] } })
+        }
+      } catch {
+        // Игнорируем ошибки редактирования (например, сообщение устарело)
+      }
       for (const order of orders) {
         const user = userRepo.findById(order.user_id)
         if (notifyUser && user) {
@@ -333,6 +341,14 @@ export function createBot(
         orderRepo.updateStatus(order.id, 'cancelled')
       }
       await ctx.answerCallbackQuery({ text: 'Заказ отклонён' })
+      try {
+        const msg = ctx.callbackQuery?.message
+        if (msg && 'message_id' in msg) {
+          await ctx.api.editMessageReplyMarkup(chatId, msg.message_id, { reply_markup: { inline_keyboard: [] } })
+        }
+      } catch {
+        // Игнорируем ошибки редактирования (например, сообщение устарело)
+      }
       for (const order of orders) {
         const user = userRepo.findById(order.user_id)
         if (notifyUser && user) {
