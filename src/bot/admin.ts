@@ -324,7 +324,7 @@ export function createBot(
       for (const order of orders) {
         const user = userRepo.findById(order.user_id)
         if (notifyUser && user) {
-          await notifyUser(user.telegram_user_id, '✅ Ваш заказ подтверждён рестораном.')
+          await notifyUser(user.telegram_user_id, '✅ Ваш заказ Подтверждён.')
         }
       }
     } else {
