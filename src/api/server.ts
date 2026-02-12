@@ -11,7 +11,6 @@ import {
   RestaurantBuildingRepository,
   OrderRepository,
 } from '../db/repository'
-import { CreditRepository } from '../db/repository-credits'
 import { DraftRepository } from '../db/repository-drafts'
 import { ORDER_CONFIG } from '../utils/order-config'
 import { logger } from '../utils/logger'
@@ -27,7 +26,6 @@ export interface ApiContext {
     menu: MenuRepository
     restaurantBuilding: RestaurantBuildingRepository
     order: OrderRepository
-    credit: CreditRepository
     draft: DraftRepository
   }
 }
@@ -122,7 +120,6 @@ export function createApiServer(db: Database.Database): Express {
       menu: new MenuRepository(db),
       restaurantBuilding: new RestaurantBuildingRepository(db),
       order: new OrderRepository(db),
-      credit: new CreditRepository(db),
       draft: new DraftRepository(db),
     },
   }
@@ -812,7 +809,7 @@ export function createApiServer(db: Database.Database): Express {
     }
   })
 
-  // DELETE /api/orders/:id - отменить заказ (до дедлайна: pending — просто отмена, confirmed — refund)
+  // DELETE /api/orders/:id - отменить заказ (без работы с кредитами/баллами)
   app.delete('/api/orders/:id', (req: Request, res: Response) => {
     try {
       const orderId = parseInt(String(req.params.id))
@@ -836,15 +833,6 @@ export function createApiServer(db: Database.Database): Express {
       if (order.status === 'cancelled') {
         return res.status(400).json({ success: false, error: 'Order already cancelled' })
       }
-      if (order.status === 'confirmed') {
-        context.repos.credit.adjustBalance(
-          user.id,
-          order.total_price,
-          'refund',
-          'Отмена заказа',
-          orderId,
-        )
-      }
       context.repos.order.updateStatus(orderId, 'cancelled')
       const updatedOrder = context.repos.order.findById(orderId)!
       res.json({
@@ -857,78 +845,6 @@ export function createApiServer(db: Database.Database): Express {
     } catch (error) {
       logApiError(res, 'Error cancelling order', error)
       res.status(500).json({ success: false, error: 'Failed to cancel order' })
-    }
-  })
-
-  // === CREDITS ENDPOINTS ===
-
-  // GET /api/users/:userId/credits - получить баланс баллов пользователя
-  app.get('/api/users/:userId/credits', (req: Request, res: Response) => {
-    try {
-      const userId = parseInt(String(req.params.userId))
-      const credit = context.repos.credit.findByUserId(userId)
-
-      if (!credit) {
-        // Инициализируем баланс если не существует
-        const newCredit = context.repos.credit.initializeForUser(userId)
-        return res.json({ success: true, data: newCredit })
-      }
-
-      res.json({ success: true, data: credit })
-    } catch (error) {
-      logApiError(res, 'Error fetching credits', error)
-      res.status(500).json({ success: false, error: 'Failed to fetch credits' })
-    }
-  })
-
-  // POST /api/users/:userId/credits/adjust - изменить баланс баллов
-  app.post('/api/users/:userId/credits/adjust', (req: Request, res: Response) => {
-    try {
-      const userId = parseInt(String(req.params.userId))
-      const { amount, type, description, order_id } = req.body
-
-      if (!amount || !type || !description) {
-        return res.status(400).json({
-          success: false,
-          error: 'amount, type, and description are required',
-        })
-      }
-
-      const validTypes = ['earn', 'spend', 'refund']
-      if (!validTypes.includes(type)) {
-        return res.status(400).json({
-          success: false,
-          error: `Invalid type. Must be one of: ${validTypes.join(', ')}`,
-        })
-      }
-
-      const credit = context.repos.credit.adjustBalance(
-        userId,
-        amount,
-        type,
-        description,
-        order_id,
-      )
-
-      res.json({ success: true, data: credit })
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to adjust credits'
-      logApiError(res, 'Error adjusting credits', error)
-      res.status(500).json({ success: false, error: message })
-    }
-  })
-
-  // GET /api/users/:userId/credits/transactions - получить историю транзакций
-  app.get('/api/users/:userId/credits/transactions', (req: Request, res: Response) => {
-    try {
-      const userId = parseInt(String(req.params.userId))
-      const limit = req.query.limit ? parseInt(String(req.query.limit)) : 50
-
-      const transactions = context.repos.credit.getTransactions(userId, limit)
-      res.json({ success: true, data: transactions })
-    } catch (error) {
-      logApiError(res, 'Error fetching credit transactions', error)
-      res.status(500).json({ success: false, error: 'Failed to fetch transactions' })
     }
   })
 

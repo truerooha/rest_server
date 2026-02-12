@@ -7,7 +7,6 @@ import {
   GroupOrderRepository,
   BuildingRepository,
 } from '../db/repository'
-import { CreditRepository } from '../db/repository-credits'
 import { DraftRepository } from '../db/repository-drafts'
 import { VisionService } from '../services/vision'
 import { logger } from '../utils/logger'
@@ -99,7 +98,6 @@ export function createBot(
   const menuRepo = new MenuRepository(db)
   const orderRepo = new OrderRepository(db)
   const userRepo = new UserRepository(db)
-  const creditRepo = new CreditRepository(db)
   const draftRepo = new DraftRepository(db)
   const groupOrderRepo = new GroupOrderRepository(db)
   const buildingRepo = new BuildingRepository(db)
@@ -330,14 +328,6 @@ export function createBot(
     } else {
       groupOrderRepo.updateStatus(groupId, 'rejected')
       for (const order of orders) {
-        // [ВРЕМЕННО] pending не оплачен — refund не нужен
-        if (order.status !== 'pending') {
-          try {
-            creditRepo.adjustBalance(order.user_id, order.total_price, 'refund', 'Отмена общего заказа рестораном', order.id)
-          } catch {
-            // ignore refund errors
-          }
-        }
         orderRepo.updateStatus(order.id, 'cancelled')
       }
       await ctx.answerCallbackQuery({ text: 'Заказ отклонён' })
@@ -419,13 +409,6 @@ export function createBot(
       if (order.status === 'cancelled') {
         await ctx.answerCallbackQuery({ text: 'Заказ уже отменён' })
         return
-      }
-      if (order.status === 'confirmed') {
-        try {
-          creditRepo.adjustBalance(order.user_id, order.total_price, 'refund', 'Отмена заказа рестораном', orderId)
-        } catch {
-          // ignore refund errors (e.g. no credit record)
-        }
       }
       orderRepo.updateStatus(orderId, 'cancelled')
       await ctx.answerCallbackQuery({ text: 'Заказ отменён' })
@@ -1009,8 +992,6 @@ export function createBot(
               'menu_items',
               'restaurant_buildings',
               'user_drafts',
-              'user_credits',
-              'credit_transactions',
               'users',
               'buildings',
               'restaurants',

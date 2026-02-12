@@ -9,7 +9,6 @@ import {
   RestaurantRepository,
   UserRepository,
 } from '../../db/repository'
-import { CreditRepository } from '../../db/repository-credits'
 import { DraftRepository } from '../../db/repository-drafts'
 import { initDatabase } from '../../db/schema'
 
@@ -192,31 +191,6 @@ describe('HTTP API server', () => {
     expect(res.body.error).toContain('Missing required fields')
   })
 
-  it('GET /api/users/:userId/credits и POST /api/users/:userId/credits/adjust работают как пара баланс/транзакция', async () => {
-    const app = createApp()
-    const userRepo = new UserRepository(db)
-    const user = userRepo.create({ telegram_user_id: 12345 })
-
-    const initialRes = await request(app).get(`/api/users/${user.id}/credits`)
-    expect(initialRes.status).toBe(200)
-    expect(initialRes.body.success).toBe(true)
-    expect(initialRes.body.data.amount).toBe(0)
-
-    const adjustRes = await request(app)
-      .post(`/api/users/${user.id}/credits/adjust`)
-      .send({
-        amount: 100,
-        type: 'earn',
-        description: 'Начисление тестовых кредитов',
-      })
-
-    expect(adjustRes.status).toBe(200)
-    expect(adjustRes.body.success).toBe(true)
-    expect(adjustRes.body.data.amount).toBe(100)
-
-    const creditRepo = new CreditRepository(db)
-    const credit = creditRepo.findByUserId(user.id)!
-    expect(credit.amount).toBe(100)
-  })
+  // Тесты, связанные с системой кредитов/баллов, удалены: модель кредитов больше не используется.
 })
 
