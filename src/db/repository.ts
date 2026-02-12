@@ -11,6 +11,7 @@ import {
   GroupOrder,
   GroupOrderStatus,
 } from '../types'
+import { getTodayInAppTz } from '../utils/timezone'
 
 export class RestaurantRepository {
   constructor(private db: Database.Database) {}
@@ -326,11 +327,12 @@ export class UserRepository {
 export class OrderRepository {
   constructor(private db: Database.Database) {}
 
-  create(order: Omit<Order, 'id' | 'created_at' | 'updated_at'>): Order {
+  create(order: Omit<Order, 'id' | 'created_at' | 'updated_at' | 'order_date'>): Order {
+    const orderDate = getTodayInAppTz()
     const result = this.db
       .prepare(`
-        INSERT INTO orders (user_id, restaurant_id, building_id, items, total_price, delivery_slot, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO orders (user_id, restaurant_id, building_id, items, total_price, delivery_slot, status, order_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         order.user_id,
@@ -339,12 +341,14 @@ export class OrderRepository {
         order.items,
         order.total_price,
         order.delivery_slot,
-        order.status
+        order.status,
+        orderDate,
       )
 
     return {
       ...order,
       id: result.lastInsertRowid as number,
+      order_date: orderDate,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }
@@ -373,7 +377,12 @@ export class OrderRepository {
       .prepare('SELECT * FROM orders WHERE status = ? ORDER BY created_at DESC')
       .all(status) as Order[]
   }
-  findBySlotAndBuilding(deliverySlot: string, buildingId: number, restaurantId: number): Order[] {
+  findBySlotAndBuilding(
+    deliverySlot: string,
+    buildingId: number,
+    restaurantId: number,
+    orderDate: string,
+  ): Order[] {
     return this.db
       .prepare(`
         SELECT * FROM orders
@@ -381,10 +390,10 @@ export class OrderRepository {
           AND building_id = ?
           AND restaurant_id = ?
           AND status IN ('pending', 'restaurant_confirmed', 'preparing', 'ready', 'delivered')
-          AND date(created_at) = date('now', 'localtime')
+          AND (order_date = ? OR (order_date IS NULL AND date(created_at) = ?))
         ORDER BY created_at DESC
       `)
-      .all(deliverySlot, buildingId, restaurantId) as Order[]
+      .all(deliverySlot, buildingId, restaurantId, orderDate, orderDate) as Order[]
   }
 
   /** Заказы для агрегации при дедлайне: pending по слоту/зданию/ресторану на дату [ВРЕМЕННО без оплаты] */
@@ -401,10 +410,10 @@ export class OrderRepository {
           AND building_id = ?
           AND restaurant_id = ?
           AND status = 'pending'
-          AND date(created_at) = ?
+          AND (order_date = ? OR (order_date IS NULL AND date(created_at) = ?))
         ORDER BY created_at DESC
       `)
-      .all(deliverySlot, buildingId, restaurantId, orderDate) as Order[]
+      .all(deliverySlot, buildingId, restaurantId, orderDate, orderDate) as Order[]
   }
 
   updateStatusBatch(orderIds: number[], status: OrderStatus): void {
@@ -425,6 +434,7 @@ export class OrderRepository {
     buildingId: number,
     restaurantId: number,
     deliverySlot: string,
+    orderDate: string,
   ): Order | undefined {
     return this.db
       .prepare(
@@ -435,12 +445,12 @@ export class OrderRepository {
           AND restaurant_id = ?
           AND delivery_slot = ?
           AND status IN ('pending', 'confirmed', 'restaurant_confirmed', 'preparing', 'ready')
-          AND date(created_at) = date('now', 'localtime')
+          AND (order_date = ? OR (order_date IS NULL AND date(created_at) = ?))
         ORDER BY created_at DESC
         LIMIT 1
       `,
       )
-      .get(userId, buildingId, restaurantId, deliverySlot) as Order | undefined
+      .get(userId, buildingId, restaurantId, deliverySlot, orderDate, orderDate) as Order | undefined
   }
 
   updateStatus(id: number, status: OrderStatus): void {

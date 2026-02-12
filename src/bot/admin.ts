@@ -236,11 +236,12 @@ export function createBot(
       await ctx.reply(text, { reply_markup: keyboard })
     }
     const individualOrders = orderRepo.findActiveByRestaurantId(restaurant.id).filter((o) => {
+      const orderDate = o.order_date ?? o.created_at.split('T')[0]
       const group = groupOrderRepo.findByRestaurantAndSlot(
         o.restaurant_id,
         o.building_id,
         o.delivery_slot,
-        o.created_at.split('T')[0],
+        orderDate,
       )
       return !group || group.status !== 'pending_restaurant'
     })

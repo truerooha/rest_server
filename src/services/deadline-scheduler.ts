@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import { OrderRepository, GroupOrderRepository, RestaurantRepository, BuildingRepository } from '../db/repository'
 import { ORDER_CONFIG } from '../utils/order-config'
 import { logger } from '../utils/logger'
+import { getTodayInAppTz, getNowMinutesInAppTz } from '../utils/timezone'
 
 function toMinutes(time: string): number {
   const [hours, minutes] = time.split(':').map(Number)
@@ -13,15 +14,6 @@ function isDeadlinePassedForSlot(slotId: string, nowMinutes: number): boolean {
   const slotMinutes = toMinutes(slotId)
   const deadlineMinutes = Math.max(slotMinutes - ORDER_CONFIG.orderLeadMinutes, 0)
   return nowMinutes > deadlineMinutes
-}
-
-/** Получить дату в локальном формате YYYY-MM-DD */
-function getTodayLocal(): string {
-  const now = new Date()
-  const y = now.getFullYear()
-  const m = String(now.getMonth() + 1).padStart(2, '0')
-  const d = String(now.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
 }
 
 export type SendGroupOrderFn = (params: {
@@ -57,9 +49,8 @@ export function startDeadlineScheduler(
   const buildingRepo = new BuildingRepository(db)
 
   async function processSlotDeadlines(): Promise<void> {
-    const now = new Date()
-    const nowMinutes = now.getHours() * 60 + now.getMinutes()
-    const today = getTodayLocal()
+    const nowMinutes = getNowMinutesInAppTz()
+    const today = getTodayInAppTz()
 
     for (const slot of ORDER_CONFIG.deliverySlots) {
       if (!isDeadlinePassedForSlot(slot.id, nowMinutes)) continue
@@ -69,10 +60,10 @@ export function startDeadlineScheduler(
           `
           SELECT DISTINCT restaurant_id, building_id
           FROM orders
-          WHERE delivery_slot = ? AND status = 'pending' AND date(created_at) = ?
+          WHERE delivery_slot = ? AND status = 'pending' AND (order_date = ? OR (order_date IS NULL AND date(created_at) = ?))
         `,
         )
-        .all(slot.id, today) as Array<{ restaurant_id: number; building_id: number }>
+        .all(slot.id, today, today) as Array<{ restaurant_id: number; building_id: number }>
 
       for (const { restaurant_id, building_id } of distinctGroups) {
         const existing = groupOrderRepo.findByRestaurantAndSlot(

@@ -46,6 +46,7 @@ export interface Order {
   total_price: number
   delivery_slot: string
   status: OrderStatus
+  order_date?: string // YYYY-MM-DD в часовом поясе приложения
   created_at: string
   updated_at: string
 }

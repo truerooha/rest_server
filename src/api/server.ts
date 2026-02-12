@@ -16,6 +16,7 @@ import { DraftRepository } from '../db/repository-drafts'
 import { ORDER_CONFIG } from '../utils/order-config'
 import { logger } from '../utils/logger'
 import { config } from '../utils/config'
+import { getAppTimezoneId, getNowMinutesInAppTz, getTodayInAppTz } from '../utils/timezone'
 
 export interface ApiContext {
   db: Database.Database
@@ -156,11 +157,15 @@ export function createApiServer(db: Database.Database): Express {
     res.json({ status: 'ok', timestamp: new Date().toISOString() })
   })
 
+  // GET /api/config - конфигурация приложения (часовой пояс и т.д.)
+  app.get('/api/config', (_req: Request, res: Response) => {
+    res.json({ success: true, data: { timezone: getAppTimezoneId() } })
+  })
+
   // GET /api/delivery-slots - получить доступные слоты доставки
   app.get('/api/delivery-slots', (_req: Request, res: Response) => {
     try {
-      const now = new Date()
-      const nowMinutes = now.getHours() * 60 + now.getMinutes()
+      const nowMinutes = getNowMinutesInAppTz()
 
       const toMinutes = (time: string) => {
         const [hours, minutes] = time.split(':').map(Number)
@@ -548,11 +553,13 @@ export function createApiServer(db: Database.Database): Express {
         return res.status(404).json({ success: false, error: 'User not found' })
       }
 
+      const orderDate = getTodayInAppTz()
       const order = context.repos.order.findActiveByUserAndSlot(
         user.id,
         buildingId,
         restaurantId,
         deliverySlot,
+        orderDate,
       )
 
       if (!order || !['confirmed', 'preparing', 'ready'].includes(order.status)) {
@@ -586,11 +593,13 @@ export function createApiServer(db: Database.Database): Express {
         })
       }
 
+      const orderDate = getTodayInAppTz()
       const order = context.repos.order.findActiveByUserAndSlot(
         userId,
         buildingId,
         restaurantId,
         deliverySlot,
+        orderDate,
       )
 
       // Для блокировки интерфейса считаем "готовым" только подтверждённый/готовящийся заказ
@@ -640,11 +649,13 @@ export function createApiServer(db: Database.Database): Express {
       // Защита от дубликатов: проверяем, нет ли уже активного заказа пользователя
       // для этого же слота/здания/ресторана. Если есть — возвращаем понятную
       // бизнес-ошибку, чтобы фронт не создавал несколько заказов на одно и то же.
+      const orderDate = getTodayInAppTz()
       const existingOrder = context.repos.order.findActiveByUserAndSlot(
         Number(user_id),
         Number(building_id),
         Number(restaurant_id),
         String(delivery_slot),
+        orderDate,
       )
 
       if (existingOrder) {
@@ -692,7 +703,13 @@ export function createApiServer(db: Database.Database): Express {
       }
 
       // Получаем все заказы для этого слота/здания/ресторана
-      const orders = context.repos.order.findBySlotAndBuilding(deliverySlot, buildingId, restaurantId)
+      const orderDate = getTodayInAppTz()
+      const orders = context.repos.order.findBySlotAndBuilding(
+        deliverySlot,
+        buildingId,
+        restaurantId,
+        orderDate,
+      )
 
       // Парсим items и считаем общую сумму
       const parsedOrders = orders.map((order) => ({
