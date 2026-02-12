@@ -453,6 +453,28 @@ export class OrderRepository {
       .get(userId, buildingId, restaurantId, deliverySlot, orderDate, orderDate) as Order | undefined
   }
 
+  /** Слоты, где у пользователя есть заказ (любой статус кроме cancelled, для просмотра) */
+  findUserOrderSlotsByBuildingRestaurant(
+    userId: number,
+    buildingId: number,
+    restaurantId: number,
+    orderDate: string,
+  ): string[] {
+    const rows = this.db
+      .prepare(
+        `
+        SELECT DISTINCT delivery_slot FROM orders
+        WHERE user_id = ?
+          AND building_id = ?
+          AND restaurant_id = ?
+          AND status != 'cancelled'
+          AND (order_date = ? OR (order_date IS NULL AND date(created_at) = ?))
+      `,
+      )
+      .all(userId, buildingId, restaurantId, orderDate, orderDate) as { delivery_slot: string }[]
+    return rows.map((r) => r.delivery_slot)
+  }
+
   updateStatus(id: number, status: OrderStatus): void {
     this.db
       .prepare('UPDATE orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')

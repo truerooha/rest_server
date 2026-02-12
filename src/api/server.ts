@@ -530,6 +530,40 @@ export function createApiServer(db: Database.Database): Express {
     }
   })
 
+  // GET /api/users/by-telegram/:telegramId/order-slots - слоты, где у пользователя есть заказ (для выбора на главной)
+  app.get('/api/users/by-telegram/:telegramId/order-slots', (req: Request, res: Response) => {
+    try {
+      const telegramId = parseInt(String(req.params.telegramId))
+      const buildingId = req.query.buildingId ? parseInt(String(req.query.buildingId)) : null
+      const restaurantId = req.query.restaurantId ? parseInt(String(req.query.restaurantId)) : null
+
+      if (!Number.isFinite(telegramId) || !buildingId || !restaurantId) {
+        return res.status(400).json({
+          success: false,
+          error: 'telegramId, buildingId, and restaurantId are required',
+        })
+      }
+
+      const user = context.repos.user.findByTelegramId(telegramId)
+      if (!user) {
+        return res.json({ success: true, data: [] })
+      }
+
+      const orderDate = getTodayInAppTz()
+      const slotIds = context.repos.order.findUserOrderSlotsByBuildingRestaurant(
+        user.id,
+        buildingId,
+        restaurantId,
+        orderDate,
+      )
+
+      res.json({ success: true, data: slotIds })
+    } catch (error) {
+      logApiError(res, 'Error fetching user order slots', error)
+      res.status(500).json({ success: false, error: 'Failed to fetch order slots' })
+    }
+  })
+
   // GET /api/users/by-telegram/:telegramId/active-order - активный заказ пользователя (по telegram_user_id)
   app.get('/api/users/by-telegram/:telegramId/active-order', (req: Request, res: Response) => {
     try {
@@ -559,7 +593,7 @@ export function createApiServer(db: Database.Database): Express {
         orderDate,
       )
 
-      if (!order || !['confirmed', 'preparing', 'ready'].includes(order.status)) {
+      if (!order) {
         return res.json({ success: true, data: null })
       }
 
@@ -599,8 +633,7 @@ export function createApiServer(db: Database.Database): Express {
         orderDate,
       )
 
-      // Для блокировки интерфейса считаем "готовым" только подтверждённый/готовящийся заказ
-      if (!order || !['confirmed', 'preparing', 'ready'].includes(order.status)) {
+      if (!order) {
         return res.json({ success: true, data: null })
       }
 
