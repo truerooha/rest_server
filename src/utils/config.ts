@@ -20,6 +20,7 @@ const envSchema = z.object({
   DISABLE_ADMIN_BOT: z.string().optional(),
   DISABLE_CLIENT_BOT: z.string().optional(),
   DISABLE_MIGRATIONS: z.string().optional(),
+  MIN_LOBBY_PARTICIPANTS: z.string().optional(),
 })
 
 const parsedEnv = envSchema.safeParse(process.env)
@@ -58,6 +59,11 @@ export const config = {
   disableAdminBot: parseBooleanFlag(env.DISABLE_ADMIN_BOT),
   disableClientBot: parseBooleanFlag(env.DISABLE_CLIENT_BOT),
   disableMigrations: parseBooleanFlag(env.DISABLE_MIGRATIONS),
+  /** Минимум участников для активации слота и бесплатной доставки. По умолчанию 1 для тестирования. */
+  minLobbyParticipants: Math.max(
+    1,
+    parseInt(env.MIN_LOBBY_PARTICIPANTS || '1', 10) || 1,
+  ),
 }
 
 // Внимание:

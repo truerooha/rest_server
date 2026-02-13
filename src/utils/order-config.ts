@@ -1,6 +1,8 @@
+import { config } from './config'
+
 export const ORDER_CONFIG = {
   orderLeadMinutes: 150,
-  minLobbyParticipants: 3,
+  minLobbyParticipants: config.minLobbyParticipants,
   lobbyLeadMinutes: 150,
   deliveryPriceCentsWhenNotFull: 8300,
   deliverySlots: [
