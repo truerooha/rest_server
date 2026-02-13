@@ -10,6 +10,7 @@ import {
   MenuRepository,
   RestaurantBuildingRepository,
   OrderRepository,
+  LobbyRepository,
 } from '../db/repository'
 import { DraftRepository } from '../db/repository-drafts'
 import { ORDER_CONFIG } from '../utils/order-config'
@@ -27,6 +28,7 @@ export interface ApiContext {
     restaurantBuilding: RestaurantBuildingRepository
     order: OrderRepository
     draft: DraftRepository
+    lobby: LobbyRepository
   }
 }
 
@@ -121,6 +123,7 @@ export function createApiServer(db: Database.Database): Express {
       restaurantBuilding: new RestaurantBuildingRepository(db),
       order: new OrderRepository(db),
       draft: new DraftRepository(db),
+      lobby: new LobbyRepository(db),
     },
   }
 
@@ -160,9 +163,17 @@ export function createApiServer(db: Database.Database): Express {
   })
 
   // GET /api/delivery-slots - получить доступные слоты доставки
-  app.get('/api/delivery-slots', (_req: Request, res: Response) => {
+  // Query: buildingId, restaurantId, telegram_user_id (опционально) — при наличии возвращает поля лобби
+  app.get('/api/delivery-slots', (req: Request, res: Response) => {
     try {
       const nowMinutes = getNowMinutesInAppTz()
+      const orderDate = getTodayInAppTz()
+      const buildingId = req.query.buildingId ? parseInt(String(req.query.buildingId)) : null
+      const restaurantId = req.query.restaurantId ? parseInt(String(req.query.restaurantId)) : null
+      const telegramUserId = req.query.telegram_user_id
+        ? parseInt(String(req.query.telegram_user_id))
+        : null
+      const withLobby = buildingId != null && restaurantId != null && telegramUserId != null
 
       const toMinutes = (time: string) => {
         const [hours, minutes] = time.split(':').map(Number)
@@ -177,20 +188,56 @@ export function createApiServer(db: Database.Database): Express {
         return `${hoursLabel}:${minutesLabel}`
       }
 
+      const lobbyLeadMinutes = ORDER_CONFIG.lobbyLeadMinutes ?? ORDER_CONFIG.orderLeadMinutes
+      const minParticipants = ORDER_CONFIG.minLobbyParticipants ?? 1
+      const deliveryPriceWhenNotFull = ORDER_CONFIG.deliveryPriceCentsWhenNotFull ?? 0
+
       const slots = ORDER_CONFIG.deliverySlots.map((slot) => {
         const slotMinutes = toMinutes(slot.time)
         const deadlineMinutes = Math.max(
           slotMinutes - ORDER_CONFIG.orderLeadMinutes,
           0,
         )
+        const lobbyDeadlineMinutes = Math.max(slotMinutes - lobbyLeadMinutes, 0)
         const deadline = toTime(deadlineMinutes)
+        const lobbyDeadline = toTime(lobbyDeadlineMinutes)
         const isAvailable = nowMinutes <= deadlineMinutes
 
-        return {
+        const base = {
           id: slot.id,
           time: slot.time,
           deadline,
           isAvailable,
+        }
+
+        if (!withLobby || buildingId == null || restaurantId == null || telegramUserId == null) {
+          return base
+        }
+
+        const currentParticipants = context.repos.lobby.countReservations(
+          buildingId,
+          restaurantId,
+          slot.id,
+          orderDate,
+        )
+        const isActivated = currentParticipants >= minParticipants
+        const deliveryPriceCents = isActivated ? 0 : deliveryPriceWhenNotFull
+        const userInLobby = context.repos.lobby.hasUserReservation(
+          telegramUserId,
+          buildingId,
+          restaurantId,
+          slot.id,
+          orderDate,
+        )
+
+        return {
+          ...base,
+          lobbyDeadline,
+          minParticipants,
+          currentParticipants,
+          deliveryPriceCents,
+          isActivated,
+          userInLobby,
         }
       })
 
@@ -198,6 +245,86 @@ export function createApiServer(db: Database.Database): Express {
     } catch (error) {
       logApiError(res, 'Error fetching delivery slots', error)
       res.status(500).json({ success: false, error: 'Failed to fetch delivery slots' })
+    }
+  })
+
+  const lobbyJoinSchema = z.object({
+    telegram_user_id: z.number().int(),
+    building_id: z.number().int().positive(),
+    restaurant_id: z.number().int().positive(),
+    delivery_slot: z.string().min(1),
+  })
+
+  // POST /api/lobby/join - присоединиться к лобби слота
+  app.post('/api/lobby/join', (req: Request, res: Response) => {
+    try {
+      const parsed = lobbyJoinSchema.safeParse(req.body)
+      if (!parsed.success) {
+        return res.status(400).json({ success: false, error: 'Invalid request body' })
+      }
+      const { telegram_user_id, building_id, restaurant_id, delivery_slot } = parsed.data
+      const orderDate = getTodayInAppTz()
+      const nowMinutes = getNowMinutesInAppTz()
+
+      const toMinutes = (time: string) => {
+        const [hours, minutes] = time.split(':').map(Number)
+        return hours * 60 + minutes
+      }
+      const lobbyLeadMinutes = ORDER_CONFIG.lobbyLeadMinutes ?? ORDER_CONFIG.orderLeadMinutes
+      const slotMinutes = toMinutes(delivery_slot)
+      const lobbyDeadlineMinutes = Math.max(slotMinutes - lobbyLeadMinutes, 0)
+      if (nowMinutes > lobbyDeadlineMinutes) {
+        return res.status(400).json({
+          success: false,
+          error: 'Lobby deadline has passed',
+        })
+      }
+
+      const user = context.repos.user.findByTelegramId(telegram_user_id)
+      if (!user) {
+        return res.status(404).json({ success: false, error: 'User not found' })
+      }
+
+      context.repos.lobby.addReservation(
+        building_id,
+        restaurant_id,
+        delivery_slot,
+        orderDate,
+        user.id,
+      )
+      res.json({ success: true })
+    } catch (error) {
+      logApiError(res, 'Error joining lobby', error)
+      res.status(500).json({ success: false, error: 'Failed to join lobby' })
+    }
+  })
+
+  // POST /api/lobby/leave - выйти из лобби слота
+  app.post('/api/lobby/leave', (req: Request, res: Response) => {
+    try {
+      const parsed = lobbyJoinSchema.safeParse(req.body)
+      if (!parsed.success) {
+        return res.status(400).json({ success: false, error: 'Invalid request body' })
+      }
+      const { telegram_user_id, building_id, restaurant_id, delivery_slot } = parsed.data
+      const orderDate = getTodayInAppTz()
+
+      const user = context.repos.user.findByTelegramId(telegram_user_id)
+      if (!user) {
+        return res.status(404).json({ success: false, error: 'User not found' })
+      }
+
+      context.repos.lobby.removeReservation(
+        building_id,
+        restaurant_id,
+        delivery_slot,
+        orderDate,
+        user.id,
+      )
+      res.json({ success: true })
+    } catch (error) {
+      logApiError(res, 'Error leaving lobby', error)
+      res.status(500).json({ success: false, error: 'Failed to leave lobby' })
     }
   })
 

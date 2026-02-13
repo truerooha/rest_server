@@ -100,7 +100,17 @@ async function main() {
         notifyUser: notifyUser ?? undefined,
       })
       const userRepo = new UserRepository(db)
-      stopDeadlineScheduler = startDeadlineScheduler(db, async (params) => {
+      const notifyLobbyCancelled =
+        clientBot &&
+        (async (telegramUserId: number, slotTime: string) => {
+          await clientBot!.api.sendMessage(
+            telegramUserId,
+            `Слот ${slotTime} отменён — не набрано минимальное количество участников.`,
+          )
+        })
+      stopDeadlineScheduler = startDeadlineScheduler(
+        db,
+        async (params) => {
         const ordersWithNames = params.orders.map((o) => ({
           ...o,
           userName: userRepo.findById(o.userId)?.first_name ?? userRepo.findById(o.userId)?.username,
@@ -112,7 +122,10 @@ async function main() {
         await adminBot.api.sendMessage(params.restaurantChatId, text, {
           reply_markup: keyboard,
         })
-      })
+      },
+        60_000,
+        notifyLobbyCancelled ?? undefined,
+      )
       adminBot.catch((err) => {
         logger.error('Ошибка в админ-боте', { error: err })
       })

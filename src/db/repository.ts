@@ -593,3 +593,104 @@ export class RestaurantBuildingRepository {
       .all(restaurantId) as Building[]
   }
 }
+
+export class LobbyRepository {
+  constructor(private db: Database.Database) {}
+
+  addReservation(
+    buildingId: number,
+    restaurantId: number,
+    deliverySlot: string,
+    orderDate: string,
+    userId: number,
+  ): void {
+    this.db
+      .prepare(
+        `
+        INSERT OR IGNORE INTO slot_lobby_reservations (building_id, restaurant_id, delivery_slot, order_date, user_id)
+        VALUES (?, ?, ?, ?, ?)
+      `,
+      )
+      .run(buildingId, restaurantId, deliverySlot, orderDate, userId)
+  }
+
+  removeReservation(
+    buildingId: number,
+    restaurantId: number,
+    deliverySlot: string,
+    orderDate: string,
+    userId: number,
+  ): void {
+    this.db
+      .prepare(
+        `
+        DELETE FROM slot_lobby_reservations
+        WHERE building_id = ? AND restaurant_id = ? AND delivery_slot = ? AND order_date = ? AND user_id = ?
+      `,
+      )
+      .run(buildingId, restaurantId, deliverySlot, orderDate, userId)
+  }
+
+  countReservations(
+    buildingId: number,
+    restaurantId: number,
+    deliverySlot: string,
+    orderDate: string,
+  ): number {
+    const row = this.db
+      .prepare(
+        `
+        SELECT COUNT(*) as count FROM slot_lobby_reservations
+        WHERE building_id = ? AND restaurant_id = ? AND delivery_slot = ? AND order_date = ?
+      `,
+      )
+      .get(buildingId, restaurantId, deliverySlot, orderDate) as { count: number }
+    return row.count
+  }
+
+  hasUserReservation(
+    telegramUserId: number,
+    buildingId: number,
+    restaurantId: number,
+    deliverySlot: string,
+    orderDate: string,
+  ): boolean {
+    const row = this.db
+      .prepare(
+        `
+        SELECT COUNT(*) as count FROM slot_lobby_reservations r
+        JOIN users u ON r.user_id = u.id
+        WHERE u.telegram_user_id = ? AND r.building_id = ? AND r.restaurant_id = ? AND r.delivery_slot = ? AND r.order_date = ?
+      `,
+      )
+      .get(telegramUserId, buildingId, restaurantId, deliverySlot, orderDate) as { count: number }
+    return row.count > 0
+  }
+
+  deleteReservationsForSlot(
+    buildingId: number,
+    restaurantId: number,
+    deliverySlot: string,
+    orderDate: string,
+  ): number[] {
+    const rows = this.db
+      .prepare(
+        `
+        SELECT u.telegram_user_id FROM slot_lobby_reservations r
+        JOIN users u ON r.user_id = u.id
+        WHERE r.building_id = ? AND r.restaurant_id = ? AND r.delivery_slot = ? AND r.order_date = ?
+      `,
+      )
+      .all(buildingId, restaurantId, deliverySlot, orderDate) as { telegram_user_id: number }[]
+    const telegramIds = rows.map((r) => r.telegram_user_id)
+    this.db
+      .prepare(
+        `
+        DELETE FROM slot_lobby_reservations
+        WHERE building_id = ? AND restaurant_id = ? AND delivery_slot = ? AND order_date = ?
+      `,
+      )
+      .run(buildingId, restaurantId, deliverySlot, orderDate)
+    return telegramIds
+  }
+}

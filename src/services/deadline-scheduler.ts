@@ -1,5 +1,11 @@
 import Database from 'better-sqlite3'
-import { OrderRepository, GroupOrderRepository, RestaurantRepository, BuildingRepository } from '../db/repository'
+import {
+  OrderRepository,
+  GroupOrderRepository,
+  RestaurantRepository,
+  BuildingRepository,
+  LobbyRepository,
+} from '../db/repository'
 import { ORDER_CONFIG } from '../utils/order-config'
 import { logger } from '../utils/logger'
 import { getTodayInAppTz, getNowMinutesInAppTz } from '../utils/timezone'
@@ -14,6 +20,16 @@ function isDeadlinePassedForSlot(slotId: string, nowMinutes: number): boolean {
   const slotMinutes = toMinutes(slotId)
   const deadlineMinutes = Math.max(slotMinutes - ORDER_CONFIG.orderLeadMinutes, 0)
   return nowMinutes > deadlineMinutes
+}
+
+const lobbyLeadMinutes = ORDER_CONFIG.lobbyLeadMinutes ?? ORDER_CONFIG.orderLeadMinutes
+const minLobbyParticipants = ORDER_CONFIG.minLobbyParticipants ?? 1
+
+/** Проверяет, прошёл ли дедлайн лобби для слота */
+function isLobbyDeadlinePassed(slotId: string, nowMinutes: number): boolean {
+  const slotMinutes = toMinutes(slotId)
+  const lobbyDeadlineMinutes = Math.max(slotMinutes - lobbyLeadMinutes, 0)
+  return nowMinutes > lobbyDeadlineMinutes
 }
 
 export type SendGroupOrderFn = (params: {
@@ -33,20 +49,63 @@ export type SendGroupOrderFn = (params: {
   participantCount: number
 }) => Promise<void>
 
+export type NotifyLobbyCancelledFn = (telegramUserId: number, slotTime: string) => Promise<void>
+
 /**
  * Запускает периодическую проверку дедлайнов слотов.
  * При наступлении дедлайна агрегирует confirmed-заказы в group_order
  * и отправляет в админ-бот соответствующему ресторану.
+ * Также обрабатывает дедлайн лобби: при недоборе минимума снимает брони и уведомляет участников.
  */
 export function startDeadlineScheduler(
   db: Database.Database,
   sendGroupOrder: SendGroupOrderFn,
   intervalMs = 60_000,
+  notifyLobbyCancelled?: NotifyLobbyCancelledFn,
 ): () => void {
   const orderRepo = new OrderRepository(db)
   const groupOrderRepo = new GroupOrderRepository(db)
   const restaurantRepo = new RestaurantRepository(db)
   const buildingRepo = new BuildingRepository(db)
+  const lobbyRepo = new LobbyRepository(db)
+
+  function processLobbyDeadlines(): void {
+    const nowMinutes = getNowMinutesInAppTz()
+    const today = getTodayInAppTz()
+
+    const pairs = db
+      .prepare('SELECT DISTINCT building_id, restaurant_id FROM restaurant_buildings')
+      .all() as Array<{ building_id: number; restaurant_id: number }>
+
+    for (const slot of ORDER_CONFIG.deliverySlots) {
+      if (!isLobbyDeadlinePassed(slot.id, nowMinutes)) continue
+
+      for (const { building_id, restaurant_id } of pairs) {
+        const count = lobbyRepo.countReservations(building_id, restaurant_id, slot.id, today)
+        if (count >= minLobbyParticipants) continue
+        if (count === 0) continue
+
+        const telegramIds = lobbyRepo.deleteReservationsForSlot(
+          building_id,
+          restaurant_id,
+          slot.id,
+          today,
+        )
+        logger.info('Лобби слота отменено по недобору', {
+          slot: slot.id,
+          buildingId: building_id,
+          restaurantId: restaurant_id,
+          hadParticipants: count,
+          minRequired: minLobbyParticipants,
+        })
+        for (const tgId of telegramIds) {
+          notifyLobbyCancelled?.(tgId, slot.time).catch((err) => {
+            logger.error('Не удалось уведомить об отмене лобби', { telegramUserId: tgId, error: err })
+          })
+        }
+      }
+    }
+  }
 
   async function processSlotDeadlines(): Promise<void> {
     const nowMinutes = getNowMinutesInAppTz()
@@ -123,15 +182,16 @@ export function startDeadlineScheduler(
     }
   }
 
-  const timer = setInterval(() => {
+  function runAll(): void {
+    processLobbyDeadlines()
     processSlotDeadlines().catch((err) => {
       logger.error('Ошибка в deadline scheduler', { error: err })
     })
-  }, intervalMs)
+  }
 
-  processSlotDeadlines().catch((err) => {
-    logger.error('Ошибка при первом запуске deadline scheduler', { error: err })
-  })
+  const timer = setInterval(runAll, intervalMs)
+
+  runAll()
 
   return () => clearInterval(timer)
 }

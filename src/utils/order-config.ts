@@ -1,5 +1,8 @@
 export const ORDER_CONFIG = {
   orderLeadMinutes: 150,
+  minLobbyParticipants: 3,
+  lobbyLeadMinutes: 150,
+  deliveryPriceCentsWhenNotFull: 8300,
   deliverySlots: [
     { id: '13:00', time: '13:00' },
     { id: '17:43', time: '17:43' },
