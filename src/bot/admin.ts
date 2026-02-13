@@ -395,6 +395,30 @@ export function createBot(
       if (notifyUser && telegramUserId) {
         await notifyUser(telegramUserId, '✅ Ваш заказ принят в работу.')
       }
+      // Обновляем сообщение: статус и клавиатура с кнопкой «Готово»
+      const msg = ctx.callbackQuery?.message
+      if (msg && 'message_id' in msg && 'text' in msg) {
+        try {
+          const updatedOrder = orderRepo.findById(orderId)
+          if (updatedOrder) {
+            const items = JSON.parse(updatedOrder.items) as Array<{
+              name: string
+              price: number
+              quantity: number
+            }>
+            const lines = items.map(
+              (i) => `  • ${i.name} × ${i.quantity} — ${i.price * i.quantity} ₽`
+            )
+            const text = `📦 Заказ #${updatedOrder.id}\nСлот: ${updatedOrder.delivery_slot}\nСумма: ${updatedOrder.total_price} ₽\nСтатус: ${updatedOrder.status}\n\n${lines.join('\n')}`
+            const keyboard = new InlineKeyboard().text('🍽️ Готово', `order:${orderId}:ready`)
+            await ctx.api.editMessageText(chatId, msg.message_id, text, {
+              reply_markup: keyboard,
+            })
+          }
+        } catch {
+          // Игнорируем ошибки редактирования (например, сообщение устарело)
+        }
+      }
     } else if (action === 'ready') {
       if (order.status !== 'confirmed' && order.status !== 'restaurant_confirmed' && order.status !== 'preparing') {
         await ctx.answerCallbackQuery({ text: 'Заказ уже обработан' })
