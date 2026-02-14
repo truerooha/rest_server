@@ -1,6 +1,6 @@
 import { config } from './utils/config'
 import { initDatabase } from './db/schema'
-import { applyMigrations } from './db/migrations/migrate'
+import { applyMigrations, ensureSchemaColumns } from './db/migrations/migrate'
 import { VisionService } from './services/vision'
 import { createBot as createAdminBot, formatGroupOrderMessage } from './bot/admin'
 import { createClientBot } from './bot/client'
@@ -36,6 +36,7 @@ async function main() {
     logger.warn('Миграции отключены флагом DISABLE_MIGRATIONS')
   } else {
     applyMigrations(config.databasePath)
+    ensureSchemaColumns(db)
   }
 
   // Запускаем API сервер для Mini App сразу, чтобы Railway видел порт

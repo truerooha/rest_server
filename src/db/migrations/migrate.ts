@@ -99,6 +99,42 @@ export function applyMigrations(dbOrPath: Database.Database | string): void {
   }
 }
 
+/**
+ * Проверяет наличие колонки в таблице
+ */
+function hasColumn(db: Database.Database, table: string, column: string): boolean {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+  return rows.some((r) => r.name === column)
+}
+
+/**
+ * Восстанавливает отсутствующие колонки (если миграция была помечена как применённая,
+ * но ALTER TABLE не выполнился — например, на Railway).
+ */
+export function ensureSchemaColumns(dbOrPath: Database.Database | string): void {
+  const shouldClose = typeof dbOrPath === 'string'
+  const db = shouldClose ? new Database(dbOrPath as string) : (dbOrPath as Database.Database)
+
+  try {
+    if (!hasColumn(db, 'menu_items', 'image_url')) {
+      logger.warn('Восстанавливаем колонку menu_items.image_url')
+      db.exec('ALTER TABLE menu_items ADD COLUMN image_url TEXT')
+    }
+    if (!hasColumn(db, 'restaurants', 'min_order_amount')) {
+      logger.warn('Восстанавливаем колонку restaurants.min_order_amount')
+      db.exec('ALTER TABLE restaurants ADD COLUMN min_order_amount REAL DEFAULT 0')
+    }
+    if (!hasColumn(db, 'restaurants', 'sbp_link')) {
+      logger.warn('Восстанавливаем колонку restaurants.sbp_link')
+      db.exec('ALTER TABLE restaurants ADD COLUMN sbp_link TEXT')
+    }
+  } finally {
+    if (shouldClose) {
+      db.close()
+    }
+  }
+}
+
 // Если запускается напрямую
 if (require.main === module) {
   const dbPath = process.argv[2] || './database.db'
