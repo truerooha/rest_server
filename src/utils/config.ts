@@ -21,6 +21,7 @@ const envSchema = z.object({
   DISABLE_CLIENT_BOT: z.string().optional(),
   DISABLE_MIGRATIONS: z.string().optional(),
   MIN_LOBBY_PARTICIPANTS: z.string().optional(),
+  UPLOADS_PATH: z.string().optional(),
 })
 
 const parsedEnv = envSchema.safeParse(process.env)
@@ -64,6 +65,8 @@ export const config = {
     1,
     parseInt(env.MIN_LOBBY_PARTICIPANTS || '1', 10) || 1,
   ),
+  /** Путь к директории загруженных изображений. Railway: /data/uploads, локально: ./uploads */
+  uploadsPath: env.UPLOADS_PATH || './uploads',
 }
 
 // Внимание:

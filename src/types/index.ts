@@ -5,6 +5,7 @@ export interface Restaurant {
   name: string
   chat_id: number
   min_order_amount?: number
+  sbp_link?: string
   created_at: string
 }
 
@@ -15,6 +16,7 @@ export interface MenuItem {
   price: number
   description?: string
   category?: string
+  image_url?: string
   is_breakfast: boolean
   is_available: boolean
   created_at: string

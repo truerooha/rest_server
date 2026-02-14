@@ -61,6 +61,12 @@ export class RestaurantRepository {
       .prepare('SELECT * FROM restaurants WHERE id = ?')
       .get(id) as Restaurant | undefined
   }
+
+  updateSbpLink(id: number, sbpLink: string): void {
+    this.db
+      .prepare('UPDATE restaurants SET sbp_link = ? WHERE id = ?')
+      .run(sbpLink, id)
+  }
 }
 
 export class MenuRepository {
@@ -154,6 +160,10 @@ export class MenuRepository {
     if (updates.is_available !== undefined) {
       fields.push('is_available = ?')
       values.push(updates.is_available ? 1 : 0)
+    }
+    if (updates.image_url !== undefined) {
+      fields.push('image_url = ?')
+      values.push(updates.image_url)
     }
 
     if (fields.length === 0) return

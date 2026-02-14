@@ -12,6 +12,9 @@ import { VisionService } from '../services/vision'
 import { logger } from '../utils/logger'
 import { MENU_CATEGORIES_ORDER, detectCategory, isBreakfastDish } from '../db/constants'
 import Database from 'better-sqlite3'
+import fs from 'fs'
+import path from 'path'
+import { config } from '../utils/config'
 
 export type AdminBotOptions = {
   notifyUser?: (telegramUserId: number, text: string) => Promise<void>
@@ -105,6 +108,30 @@ export function createBot(
 
   const userStates = new Map<number, UserState>()
   const awaitingRestaurantName = new Set<number>()
+  const awaitingPhotoForItem = new Map<number, number>() // chatId → menuItemId
+  const awaitingSbpLink = new Set<number>() // chatId
+
+  /** Удаляет файл изображения блюда с диска, если он существует */
+  function deleteItemImage(imageUrl: string | undefined | null): void {
+    if (!imageUrl) return
+    try {
+      const filename = path.basename(imageUrl)
+      const filepath = path.join(config.uploadsPath, filename)
+      if (fs.existsSync(filepath)) {
+        fs.unlinkSync(filepath)
+      }
+    } catch (err) {
+      logger.warn('Не удалось удалить файл изображения', { imageUrl, error: err })
+    }
+  }
+
+  /** Удаляет все файлы изображений для блюд ресторана */
+  function deleteAllItemImages(restaurantId: number): void {
+    const items = menuRepo.findByRestaurantId(restaurantId)
+    for (const item of items) {
+      deleteItemImage(item.image_url)
+    }
+  }
 
   function getHelpText(): string {
     return (
@@ -125,6 +152,10 @@ export function createBot(
 /delete - удалить блюдо
 /stoplist - управление доступностью блюд
 /edit - редактировать блюдо
+/photos - добавить фотографии к блюдам
+
+**Настройки:**
+/payment - ссылка для оплаты по СБП
 
 **Опасная зона:**
       /clearall - удалить все данные вашего ресторана
@@ -480,6 +511,12 @@ export function createBot(
     if (awaitingRestaurantName.has(chatId)) {
       awaitingRestaurantName.delete(chatId)
       await ctx.reply('Отменено. Напишите /start когда будете готовы.')
+    } else if (awaitingPhotoForItem.has(chatId)) {
+      awaitingPhotoForItem.delete(chatId)
+      await ctx.reply('❌ Загрузка фото отменена')
+    } else if (awaitingSbpLink.has(chatId)) {
+      awaitingSbpLink.delete(chatId)
+      await ctx.reply('❌ Ввод ссылки СБП отменён')
     } else if (userStates.has(chatId)) {
       userStates.delete(chatId)
       await ctx.reply('❌ Операция отменена')
@@ -688,6 +725,34 @@ export function createBot(
         await ctx.answerCallbackQuery('Блюдо добавлено!')
       }
       
+      // Выбор блюда для загрузки фото
+      else if (data.startsWith('photo:')) {
+        const itemId = parseInt(data.replace('photo:', ''))
+        const item = menuRepo.findById(itemId)
+
+        if (!item) {
+          await ctx.answerCallbackQuery('Блюдо не найдено')
+          return
+        }
+
+        awaitingPhotoForItem.set(chatId, itemId)
+
+        const hasPhoto = item.image_url ? '\n\n⚠️ У блюда уже есть фото — оно будет заменено.' : ''
+        await ctx.editMessageText(
+          `📷 **Отправьте фото для блюда:**\n\n` +
+          `📋 ${item.name} — ${item.price}₽${hasPhoto}\n\n` +
+          `_Для отмены отправьте /cancel_`,
+          { parse_mode: 'Markdown' }
+        )
+
+        await ctx.answerCallbackQuery()
+      }
+
+      // noop — пустая кнопка-разделитель
+      else if (data === 'noop') {
+        await ctx.answerCallbackQuery()
+      }
+
       // Обработка удаления блюда
       else if (data.startsWith('delete:')) {
         const itemId = parseInt(data.replace('delete:', ''))
@@ -730,6 +795,7 @@ export function createBot(
         }
 
         const itemName = item.name
+        deleteItemImage(item.image_url)
         menuRepo.deleteItem(itemId)
 
         await ctx.editMessageText(
@@ -949,6 +1015,7 @@ export function createBot(
 
         try {
           const restaurantId = restaurant.id
+          deleteAllItemImages(restaurantId)
           const deleteTransaction = db.transaction(() => {
             // Удаляем в порядке учёта FK
             db.prepare('DELETE FROM orders WHERE restaurant_id = ?').run(restaurantId)
@@ -1010,6 +1077,18 @@ export function createBot(
       // [ТЕСТ] Подтверждение полной очистки базы
       else if (data === 'confirm_wipeall') {
         try {
+          // Удаляем все файлы изображений
+          try {
+            const uploadsDir = config.uploadsPath
+            if (fs.existsSync(uploadsDir)) {
+              const files = fs.readdirSync(uploadsDir).filter((f) => f !== '.gitkeep')
+              for (const file of files) {
+                fs.unlinkSync(path.join(uploadsDir, file))
+              }
+            }
+          } catch (err) {
+            logger.warn('Не удалось очистить директорию uploads', { error: err })
+          }
           const deleteAll = db.transaction(() => {
             const tables = [
               'orders',
@@ -1047,12 +1126,123 @@ export function createBot(
     }
   })
 
+  // Команда /photos — управление фотографиями блюд
+  bot.command('photos', async (ctx: Context) => {
+    const chatId = ctx.chat?.id
+    if (!chatId) return
+
+    const restaurant = restaurantRepo.findByChatId(chatId)
+    if (!restaurant) {
+      await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
+      return
+    }
+
+    const items = menuRepo.findByRestaurantId(restaurant.id)
+    if (items.length === 0) {
+      await ctx.reply('Меню пусто! Сначала отправьте фото меню для распознавания.')
+      return
+    }
+
+    const withPhoto = items.filter((i) => i.image_url)
+    const withoutPhoto = items.filter((i) => !i.image_url)
+
+    let message = `📷 **Фотографии блюд**\n\n`
+    message += `✅ С фото: ${withPhoto.length}\n`
+    message += `📷 Без фото: ${withoutPhoto.length}\n\n`
+
+    if (withoutPhoto.length === 0) {
+      message += 'У всех блюд есть фотографии! 🎉\n\n'
+      message += '_Нажмите на блюдо, чтобы заменить фото._'
+    } else {
+      message += 'Выберите блюдо, чтобы добавить фото:'
+    }
+
+    const keyboard = new InlineKeyboard()
+
+    // Сначала блюда без фото
+    for (const item of withoutPhoto) {
+      keyboard.text(`📷 ${item.name}`, `photo:${item.id}`).row()
+    }
+
+    // Затем блюда с фото (для замены)
+    if (withPhoto.length > 0 && withoutPhoto.length > 0) {
+      keyboard.text('— С фото (заменить) —', 'noop').row()
+    }
+    for (const item of withPhoto) {
+      keyboard.text(`✅ ${item.name}`, `photo:${item.id}`).row()
+    }
+
+    await ctx.reply(message, {
+      parse_mode: 'Markdown',
+      reply_markup: keyboard,
+    })
+  })
+
   // Обработка фото
   bot.on('message:photo', async (ctx: Context) => {
     try {
       const chatId = ctx.chat?.id
       if (!chatId) {
         await ctx.reply('❌ Не удалось определить chat ID')
+        return
+      }
+
+      // Если ожидаем фото для конкретного блюда — сохраняем как image_url
+      const awaitedItemId = awaitingPhotoForItem.get(chatId)
+      if (awaitedItemId !== undefined) {
+        awaitingPhotoForItem.delete(chatId)
+
+        const photos = ctx.message?.photo
+        if (!photos || photos.length === 0) {
+          await ctx.reply('❌ Фото не найдено. Попробуйте ещё раз.')
+          return
+        }
+
+        const item = menuRepo.findById(awaitedItemId)
+        if (!item) {
+          await ctx.reply('❌ Блюдо не найдено.')
+          return
+        }
+
+        await ctx.reply('⏳ Сохраняю фото...')
+
+        const photo = photos[photos.length - 1]
+        const file = await ctx.api.getFile(photo.file_id)
+        const fileUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`
+
+        // Скачиваем и сохраняем файл
+        const uploadsDir = config.uploadsPath
+        if (!fs.existsSync(uploadsDir)) {
+          fs.mkdirSync(uploadsDir, { recursive: true })
+        }
+
+        const ext = file.file_path?.split('.').pop() || 'jpg'
+        const filename = `menu_${awaitedItemId}_${Date.now()}.${ext}`
+        const filepath = path.join(uploadsDir, filename)
+
+        const response = await fetch(fileUrl)
+        if (!response.ok) {
+          await ctx.reply('❌ Не удалось скачать фото из Telegram. Попробуйте ещё раз.')
+          return
+        }
+        const buffer = Buffer.from(await response.arrayBuffer())
+        fs.writeFileSync(filepath, buffer)
+
+        // Удаляем старый файл, если был
+        if (item.image_url) {
+          const oldPath = path.join(config.uploadsPath, path.basename(item.image_url))
+          if (fs.existsSync(oldPath)) {
+            try { fs.unlinkSync(oldPath) } catch { /* ignore */ }
+          }
+        }
+
+        const imageUrl = `/uploads/${filename}`
+        menuRepo.updateItem(awaitedItemId, { image_url: imageUrl })
+
+        await ctx.reply(
+          `✅ Фото для «${item.name}» сохранено!\n\n` +
+          `/photos — добавить фото к другим блюдам`
+        )
         return
       }
 
@@ -1088,7 +1278,8 @@ export function createBot(
         return
       }
 
-      // Удаляем старое меню (если есть) и сохраняем новое
+      // Удаляем старое меню и связанные изображения (если есть) и сохраняем новое
+      deleteAllItemImages(restaurant.id)
       menuRepo.deleteAllByRestaurantId(restaurant.id)
 
       for (const item of enrichedItems) {
@@ -1130,7 +1321,8 @@ export function createBot(
       }
 
       message += 'Меню сохранено в базу данных! 🎉\n\n'
-      message += '💡 Используйте /menu для просмотра меню по категориям'
+      message += '💡 Используйте /menu для просмотра меню по категориям\n'
+      message += '📷 Используйте /photos чтобы добавить фотографии к блюдам'
 
       await ctx.reply(message, { parse_mode: 'Markdown' })
     } catch (error) {
@@ -1366,6 +1558,36 @@ export function createBot(
     )
   })
 
+  // Команда /payment — настройка ссылки для оплаты по СБП
+  bot.command('payment', async (ctx: Context) => {
+    const chatId = ctx.chat?.id
+    if (!chatId) return
+
+    const restaurant = restaurantRepo.findByChatId(chatId)
+    if (!restaurant) {
+      await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
+      return
+    }
+
+    const currentLink = restaurant.sbp_link
+    let message = '💳 **Оплата по СБП**\n\n'
+
+    if (currentLink) {
+      message += `Текущая ссылка:\n${currentLink}\n\n`
+      message += 'Отправьте новую ссылку, чтобы заменить текущую.\n'
+    } else {
+      message += 'Ссылка для оплаты не настроена.\n\n'
+      message += 'Отправьте ссылку на оплату по СБП (начинается с https://).\n'
+      message += 'Эта ссылка будет использоваться клиентами для оплаты заказов.\n'
+    }
+
+    message += '\n_Для отмены отправьте /cancel_'
+
+    awaitingSbpLink.add(chatId)
+
+    await ctx.reply(message, { parse_mode: 'Markdown' })
+  })
+
   // Команда /clearall - удалить все данные ТЕКУЩЕГО ресторана
   bot.command('clearall', async (ctx: Context) => {
     const chatId = ctx.chat?.id
@@ -1428,6 +1650,28 @@ export function createBot(
         parse_mode: 'Markdown',
         reply_markup: getMainKeyboard(),
       })
+      return
+    }
+
+    // Ожидание ссылки СБП
+    if (awaitingSbpLink.has(chatId)) {
+      const link = text.trim()
+      if (!link.startsWith('https://')) {
+        await ctx.reply('❌ Ссылка должна начинаться с https://\n\nПопробуйте ещё раз или отправьте /cancel')
+        return
+      }
+      awaitingSbpLink.delete(chatId)
+      const restaurant = restaurantRepo.findByChatId(chatId)
+      if (!restaurant) {
+        await ctx.reply('❌ Ресторан не найден.')
+        return
+      }
+      restaurantRepo.updateSbpLink(restaurant.id, link)
+      await ctx.reply(
+        `✅ Ссылка СБП сохранена!\n\n` +
+        `💳 ${link}\n\n` +
+        `Клиенты будут использовать эту ссылку для оплаты заказов.`
+      )
       return
     }
 

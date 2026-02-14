@@ -112,6 +112,9 @@ export function createApiServer(db: Database.Database): Express {
   )
   app.use(express.json())
 
+  // Раздача загруженных изображений блюд
+  app.use('/uploads', express.static(config.uploadsPath))
+
   // Создаём репозитории
   const context: ApiContext = {
     db,
