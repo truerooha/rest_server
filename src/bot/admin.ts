@@ -74,7 +74,7 @@ function escapeHtml(text: string): string {
 
 // Типы для управления состоянием диалогов
 type ConversationStep = 'name' | 'price' | 'description' | 'category'
-type EditField = 'name' | 'price' | 'description' | 'category'
+type EditField = 'name' | 'price' | 'description' | 'category' | 'photo'
 
 interface UserState {
   action: 'add' | 'edit'
@@ -870,19 +870,24 @@ export function createBot(
           return
         }
 
+        const photoLabel = item.image_url ? '📷 Фото ✅' : '📷 Фото'
         const keyboard = new InlineKeyboard()
           .text('📝 Название', `edit_field:${itemId}:name`).row()
           .text('💰 Цена', `edit_field:${itemId}:price`).row()
           .text('📄 Описание', `edit_field:${itemId}:description`).row()
           .text('🗂️ Категория', `edit_field:${itemId}:category`).row()
+          .text(photoLabel, `edit_field:${itemId}:photo`).row()
           .text('❌ Отмена', 'cancel_edit')
+
+        const photoStatus = item.image_url ? '📷 Фото: ✅ есть' : '📷 Фото: нет'
 
         await ctx.editMessageText(
           `✏️ **Редактирование блюда**\n\n` +
           `📋 ${item.name}\n` +
           `💰 ${item.price}₽\n` +
           `📄 ${item.description || '_нет описания_'}\n` +
-          `🗂️ ${item.category || 'Без категории'}\n\n` +
+          `🗂️ ${item.category || 'Без категории'}\n` +
+          `${photoStatus}\n\n` +
           `Что хотите изменить?`,
           {
             parse_mode: 'Markdown',
@@ -905,7 +910,32 @@ export function createBot(
           return
         }
 
-        if (field === 'category') {
+        if (field === 'photo') {
+          // Для фото — показываем варианты: загрузить новое, удалить текущее
+          const keyboard = new InlineKeyboard()
+            .text('📷 Загрузить новое фото', `edit_photo_upload:${itemId}`).row()
+
+          if (item.image_url) {
+            keyboard.text('🗑️ Удалить фото', `edit_photo_delete:${itemId}`).row()
+          }
+
+          keyboard.text('◀️ Назад', `edit_select:${itemId}`).row()
+
+          const photoInfo = item.image_url
+            ? '✅ У блюда есть фото.'
+            : '❌ У блюда нет фото.'
+
+          await ctx.editMessageText(
+            `📷 **Фото блюда**\n\n` +
+            `📋 ${item.name}\n` +
+            `${photoInfo}\n\n` +
+            `Выберите действие:`,
+            {
+              parse_mode: 'Markdown',
+              reply_markup: keyboard,
+            }
+          )
+        } else if (field === 'category') {
           // Для категории показываем inline клавиатуру
           const keyboard = new InlineKeyboard()
           
@@ -991,6 +1021,54 @@ export function createBot(
         )
 
         await ctx.answerCallbackQuery('Категория изменена!')
+      }
+
+      // Загрузка нового фото из редактирования
+      else if (data.startsWith('edit_photo_upload:')) {
+        const itemId = parseInt(data.replace('edit_photo_upload:', ''))
+        const item = menuRepo.findById(itemId)
+
+        if (!item) {
+          await ctx.answerCallbackQuery('Блюдо не найдено')
+          return
+        }
+
+        awaitingPhotoForItem.set(chatId, itemId)
+
+        await ctx.editMessageText(
+          `📷 **Загрузка фото**\n\n` +
+          `📋 ${item.name} — ${item.price}₽\n\n` +
+          `Отправьте фото блюда.\n` +
+          (item.image_url ? '_Текущее фото будет заменено._\n' : '') +
+          `\n_Для отмены отправьте /cancel_`,
+          { parse_mode: 'Markdown' }
+        )
+
+        await ctx.answerCallbackQuery()
+      }
+
+      // Удаление фото из редактирования
+      else if (data.startsWith('edit_photo_delete:')) {
+        const itemId = parseInt(data.replace('edit_photo_delete:', ''))
+        const item = menuRepo.findById(itemId)
+
+        if (!item) {
+          await ctx.answerCallbackQuery('Блюдо не найдено')
+          return
+        }
+
+        deleteItemImage(item.image_url)
+        menuRepo.updateItem(itemId, { image_url: null })
+
+        await ctx.editMessageText(
+          `✅ Фото удалено!\n\n` +
+          `📋 ${item.name}\n\n` +
+          `/edit - редактировать ещё\n` +
+          `/photos - добавить фото к блюдам`,
+          { parse_mode: 'Markdown' }
+        )
+
+        await ctx.answerCallbackQuery('Фото удалено')
       }
       
       // Отмена редактирования
