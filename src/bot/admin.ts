@@ -1062,6 +1062,23 @@ export function createBot(
           await ctx.answerCallbackQuery()
           return
         }
+        if (suffix === 'noop') {
+          await ctx.answerCallbackQuery()
+          return
+        }
+        if (suffix.startsWith('pg:')) {
+          const page = parseInt(suffix.replace('pg:', ''), 10)
+          const categories = pendingRenameCategories.get(chatId)
+          const restaurant = restaurantRepo.findByChatId(chatId)
+          if (!categories || !restaurant || isNaN(page) || page < 0) {
+            await ctx.answerCallbackQuery('Сессия истекла. Отправьте /rename_category заново.')
+            return
+          }
+          const { keyboard } = buildRenameCategoryKeyboard(categories, restaurant.id, page)
+          await ctx.editMessageReplyMarkup({ reply_markup: keyboard })
+          await ctx.answerCallbackQuery()
+          return
+        }
 
         const index = parseInt(suffix, 10)
         const categories = pendingRenameCategories.get(chatId)
@@ -1868,6 +1885,37 @@ export function createBot(
     }
   })
 
+  const RENAME_CAT_PAGE_SIZE = 8
+
+  /** Формирует клавиатуру выбора категории для переименования с пагинацией */
+  function buildRenameCategoryKeyboard(
+    categories: string[],
+    restaurantId: number,
+    page: number
+  ): { keyboard: InlineKeyboard; totalPages: number } {
+    const totalPages = Math.max(1, Math.ceil(categories.length / RENAME_CAT_PAGE_SIZE))
+    const safePage = Math.min(page, totalPages - 1)
+    const start = safePage * RENAME_CAT_PAGE_SIZE
+    const pageCategories = categories.slice(start, start + RENAME_CAT_PAGE_SIZE)
+
+    const keyboard = new InlineKeyboard()
+    pageCategories.forEach((category, i) => {
+      const globalIndex = start + i
+      const itemsCount = menuRepo.findByCategoryAndRestaurantId(category, restaurantId).length
+      const label = category.length > 25 ? `${category.slice(0, 22)}… (${itemsCount})` : `${category} (${itemsCount})`
+      keyboard.text(label, `rename_cat:${globalIndex}`)
+    })
+    if (totalPages > 1) {
+      const navRow: Array<{ text: string; data: string }> = []
+      if (safePage > 0) navRow.push({ text: '◀️', data: `rename_cat:pg:${safePage - 1}` })
+      navRow.push({ text: `${safePage + 1}/${totalPages}`, data: 'rename_cat:noop' })
+      if (safePage < totalPages - 1) navRow.push({ text: '▶️', data: `rename_cat:pg:${safePage + 1}` })
+      navRow.forEach((b) => keyboard.text(b.text, b.data))
+    }
+    keyboard.row().text('❌ Отмена', 'rename_cat:cancel')
+    return { keyboard, totalPages }
+  }
+
   // Команда /rename_category - переименовать категорию для всех блюд
   bot.command('rename_category', async (ctx: Context) => {
     try {
@@ -1886,17 +1934,11 @@ export function createBot(
         return
       }
 
-      const keyboard = new InlineKeyboard()
-      categories.forEach((category, index) => {
-        const itemsCount = menuRepo.findByCategoryAndRestaurantId(category, restaurant.id).length
-        keyboard.text(`${category} (${itemsCount})`, `rename_cat:${index}`)
-      })
-      keyboard.row().text('❌ Отмена', 'rename_cat:cancel')
-
+      const { keyboard } = buildRenameCategoryKeyboard(categories, restaurant.id, 0)
       pendingRenameCategories.set(chatId, categories)
       await ctx.reply(
         '✏️ <b>Переименовать категорию</b>\n\n' +
-          'Выберите категорию, которую нужно переименовать. Новое название применится ко всем блюдам этой категории.',
+          'Выберите категорию. Новое название применится ко всем блюдам. Используйте ◀️▶️ для навигации.',
         { parse_mode: 'HTML', reply_markup: keyboard }
       )
     } catch (error) {
