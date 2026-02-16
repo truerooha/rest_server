@@ -353,15 +353,15 @@ export function createApiServer(db: Database.Database): Express {
       if (restaurants.length === 0) {
         // Создаём дефолтный ресторан если нет ни одного
         const result = context.repos.restaurant.create({
-          name: 'Грамм',
-          chat_id: 123456789 // Dummy chat ID
+          name: 'Фудкорнер',
+          chat_id: 123456789, // Dummy chat ID
         })
         restaurant = result
       } else {
         const withMenu = findRestaurantWithMenu()
         restaurant = withMenu ?? restaurants[0]
-        if (!withMenu && restaurant.name !== 'Грамм') {
-          db.prepare('UPDATE restaurants SET name = ? WHERE id = ?').run('Грамм', restaurant.id)
+        if (!withMenu && restaurant.name !== 'Фудкорнер') {
+          db.prepare('UPDATE restaurants SET name = ? WHERE id = ?').run('Фудкорнер', restaurant.id)
         }
       }
 

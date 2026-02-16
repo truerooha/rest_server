@@ -9,7 +9,7 @@ import { config } from '../utils/config'
 /**
  * Скрипт для создания дефолтных данных:
  * - Здание "Коворкинг"
- * - Связь ресторана "Грамм" со зданием
+ * - Связь ресторана "Фудкорнер" со зданием
  * 
  * Запуск: tsx src/scripts/seed-default-data.ts
  */
@@ -38,28 +38,28 @@ async function seedDefaultData() {
       console.log(`✅ Здание "Коворкинг" уже существует (ID: ${coworkingBuilding.id})`)
     }
 
-    // 2. Находим первый ресторан и переименовываем в "Грамм"
-    console.log('\n🍽️  Проверка ресторана "Грамм"...')
+    // 2. Находим первый ресторан и переименовываем в "Фудкорнер"
+    console.log('\n🍽️  Проверка ресторана "Фудкорнер"...')
     let restaurants = db.prepare('SELECT * FROM restaurants').all() as any[]
     let restaurant: any
 
     if (restaurants.length === 0) {
-      console.log('⚠️  Нет ресторанов. Создаём дефолтный ресторан "Грамм"...')
+      console.log('⚠️  Нет ресторанов. Создаём дефолтный ресторан "Фудкорнер"...')
       const result = restaurantRepo.create({
-        name: 'Грамм',
+        name: 'Фудкорнер',
         chat_id: 123456789 // Dummy chat ID
       })
       restaurant = result
       console.log(`✅ Создан дефолтный ресторан (ID: ${restaurant.id})`)
     } else {
       restaurant = restaurants[0]
-      // Переименовываем в "Грамм" если нужно
-      if (restaurant.name !== 'Грамм') {
+      // Переименовываем в "Фудкорнер" если нужно
+      if (restaurant.name !== 'Фудкорнер') {
         db.prepare('UPDATE restaurants SET name = ? WHERE id = ?')
-          .run('Грамм', restaurant.id)
-        console.log(`✅ Ресторан переименован: "${restaurant.name}" → "Грамм"`)
+          .run('Фудкорнер', restaurant.id)
+        console.log(`✅ Ресторан переименован: "${restaurant.name}" → "Фудкорнер"`)
       } else {
-        console.log('✅ Ресторан "Грамм" уже существует')
+        console.log('✅ Ресторан "Фудкорнер" уже существует')
       }
     }
 
@@ -71,7 +71,7 @@ async function seedDefaultData() {
 
     if (!existingLink) {
       restaurantBuildingRepo.link(restaurant.id, coworkingBuilding.id)
-      console.log('✅ Ресторан "Грамм" связан со зданием "Коворкинг"')
+      console.log('✅ Ресторан "Фудкорнер" связан со зданием "Коворкинг"')
     } else {
       console.log('✅ Связь уже существует')
     }
@@ -82,7 +82,7 @@ async function seedDefaultData() {
     console.log('='.repeat(60))
     console.log(`\n🏢 Здание: ${coworkingBuilding.name} (ID: ${coworkingBuilding.id})`)
     console.log(`   Адрес: ${coworkingBuilding.address}`)
-    console.log(`\n🍽️  Ресторан: Грамм (ID: ${restaurant.id})`)
+    console.log(`\n🍽️  Ресторан: Фудкорнер (ID: ${restaurant.id})`)
     console.log(`   Chat ID: ${restaurant.chat_id}`)
     
     const menuItems = db.prepare('SELECT COUNT(*) as count FROM menu_items WHERE restaurant_id = ?')
@@ -92,7 +92,7 @@ async function seedDefaultData() {
     console.log('\n✅ Дефолтные данные настроены!')
     console.log('\n💡 Теперь клиентский бот будет автоматически использовать:')
     console.log('   - Здание: Коворкинг')
-    console.log('   - Ресторан: Грамм\n')
+    console.log('   - Ресторан: Фудкорнер\n')
 
   } catch (error) {
     console.error('❌ Ошибка:', error)
