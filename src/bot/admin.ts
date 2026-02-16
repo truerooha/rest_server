@@ -1147,6 +1147,148 @@ export function createBot(
         await ctx.answerCallbackQuery('Отменено')
       }
 
+      // [ТЕСТ] Запрос на удаление конкретного ресторана по ID
+      else if (data.startsWith('delete_restaurant:')) {
+        const restaurantId = parseInt(data.replace('delete_restaurant:', ''))
+        if (!Number.isFinite(restaurantId)) {
+          await ctx.answerCallbackQuery('Некорректный ID ресторана')
+          return
+        }
+
+        const target = restaurantRepo.findById(restaurantId)
+        if (!target) {
+          await ctx.answerCallbackQuery('Ресторан не найден')
+          return
+        }
+
+        const currentChatId =
+          ctx.callbackQuery?.message && 'chat' in ctx.callbackQuery.message
+            ? ctx.callbackQuery.message.chat.id
+            : ctx.chat?.id
+        if (currentChatId && target.chat_id === currentChatId) {
+          await ctx.answerCallbackQuery()
+          await ctx.editMessageText(
+            '❌ Нельзя удалить ресторан, к которому привязан текущий чат бота.\n\n' +
+              'Используйте другого бота/чат для удаления или сначала перенесите данные.',
+          )
+          return
+        }
+
+        const stats = db
+          .prepare(
+            `
+            SELECT
+              (SELECT COUNT(*) FROM menu_items m WHERE m.restaurant_id = r.id) AS menu_count,
+              (SELECT COUNT(*) FROM orders o WHERE o.restaurant_id = r.id) AS order_count,
+              (SELECT COUNT(*) FROM restaurant_buildings rb WHERE rb.restaurant_id = r.id) AS rb_count
+            FROM restaurants r
+            WHERE r.id = ?
+          `,
+          )
+          .get(restaurantId) as
+          | {
+              menu_count: number
+              order_count: number
+              rb_count: number
+            }
+          | undefined
+
+        const keyboard = new InlineKeyboard()
+          .text('⚠️ ДА, УДАЛИТЬ РЕСТОРАН', `confirm_delete_restaurant:${restaurantId}`)
+          .row()
+          .text('❌ Отмена', 'cancel_delete_restaurant')
+
+        await ctx.editMessageText(
+          '🚨 <b>[ТЕСТ] Удаление ресторана</b>\n\n' +
+            `Ресторан: <b>${escapeHtml(target.name)}</b>\n` +
+            `ID: <code>${target.id}</code>\n` +
+            `chat_id: <code>${target.chat_id ?? '—'}</code>\n\n` +
+            `Блюд в меню: <b>${stats?.menu_count ?? 0}</b>\n` +
+            `Заказов: <b>${stats?.order_count ?? 0}</b>\n` +
+            `Связей со зданиями: <b>${stats?.rb_count ?? 0}</b>\n\n` +
+            '⚠️ Будут удалены:\n' +
+            '• Все блюда этого ресторана\n' +
+            '• Все заказы этого ресторана\n' +
+            '• Все связи ресторан–здание\n' +
+            '• Черновики заказов, привязанные к ресторану\n' +
+            '• Лобби-резервации и групповые заказы этого ресторана\n\n' +
+            '<b>Это действие необратимо. Использовать только в тестовой среде!</b>',
+          { parse_mode: 'HTML', reply_markup: keyboard },
+        )
+
+        await ctx.answerCallbackQuery()
+      }
+
+      // [ТЕСТ] Подтверждение удаления ресторана с его данными
+      else if (data.startsWith('confirm_delete_restaurant:')) {
+        const restaurantId = parseInt(data.replace('confirm_delete_restaurant:', ''))
+        if (!Number.isFinite(restaurantId)) {
+          await ctx.answerCallbackQuery('Некорректный ID ресторана')
+          return
+        }
+
+        const target = restaurantRepo.findById(restaurantId)
+        if (!target) {
+          await ctx.editMessageText('❌ Ресторан не найден (возможно, уже удалён).')
+          await ctx.answerCallbackQuery('Ресторан не найден')
+          return
+        }
+
+        const currentChatId =
+          ctx.callbackQuery?.message && 'chat' in ctx.callbackQuery.message
+            ? ctx.callbackQuery.message.chat.id
+            : ctx.chat?.id
+        if (currentChatId && target.chat_id === currentChatId) {
+          await ctx.answerCallbackQuery()
+          await ctx.editMessageText(
+            '❌ Нельзя удалить ресторан, к которому привязан текущий чат бота.\n\n' +
+              'Используйте другого бота/чат для удаления или сначала перенесите данные.',
+          )
+          return
+        }
+
+        try {
+          const deleteTx = db.transaction(() => {
+            // Лобби и групповые заказы
+            db.prepare('DELETE FROM slot_lobby_reservations WHERE restaurant_id = ?').run(restaurantId)
+            db.prepare('DELETE FROM group_orders WHERE restaurant_id = ?').run(restaurantId)
+            // Заказы и меню
+            db.prepare('DELETE FROM orders WHERE restaurant_id = ?').run(restaurantId)
+            db.prepare('DELETE FROM menu_items WHERE restaurant_id = ?').run(restaurantId)
+            // Связи ресторан–здание
+            db.prepare('DELETE FROM restaurant_buildings WHERE restaurant_id = ?').run(restaurantId)
+            // Черновики, привязанные к ресторану
+            db.prepare(
+              'UPDATE user_drafts SET restaurant_id = NULL, items = ? WHERE restaurant_id = ?',
+            ).run('[]', restaurantId)
+            // Сам ресторан
+            db.prepare('DELETE FROM restaurants WHERE id = ?').run(restaurantId)
+          })
+
+          deleteTx()
+
+          await ctx.editMessageText(
+            '✅ [ТЕСТ] Ресторан и все связанные с ним данные удалены.\n\n' +
+              `ID: <code>${restaurantId}</code>`,
+            { parse_mode: 'HTML' },
+          )
+          await ctx.answerCallbackQuery('Удалено')
+        } catch (error) {
+          const err = error instanceof Error ? error.message : String(error)
+          logger.error('Ошибка при удалении ресторана', { error })
+          await ctx.editMessageText(`❌ Ошибка при удалении ресторана: <code>${err}</code>`, {
+            parse_mode: 'HTML',
+          })
+          await ctx.answerCallbackQuery('Ошибка')
+        }
+      }
+
+      // [ТЕСТ] Отмена удаления ресторана
+      else if (data === 'cancel_delete_restaurant') {
+        await ctx.editMessageText('✅ Удаление ресторана отменено.')
+        await ctx.answerCallbackQuery('Отменено')
+      }
+
       // [ТЕСТ] Подтверждение удаления всех заказов
       else if (data === 'confirm_wipe_orders') {
         try {
@@ -1760,6 +1902,78 @@ export function createBot(
       '⚠️ <b>Необратимо!</b>',
       { parse_mode: 'HTML', reply_markup: keyboard }
     )
+  })
+
+  // [ТЕСТ] Команда /restaurants_admin - показать список ресторанов и позволить удалить лишние
+  bot.command('restaurants_admin', async (ctx: Context) => {
+    const chatId = ctx.chat?.id
+    if (!chatId) return
+
+    try {
+      const rows = db
+        .prepare(
+          `
+          SELECT
+            r.id,
+            r.name,
+            r.chat_id,
+            r.created_at,
+            (SELECT COUNT(*) FROM menu_items m WHERE m.restaurant_id = r.id) AS menu_count,
+            (SELECT COUNT(*) FROM orders o WHERE o.restaurant_id = r.id) AS order_count,
+            (SELECT COUNT(*) FROM restaurant_buildings rb WHERE rb.restaurant_id = r.id) AS rb_count
+          FROM restaurants r
+          ORDER BY r.id
+        `,
+        )
+        .all() as Array<{
+        id: number
+        name: string
+        chat_id?: number | null
+        created_at?: string
+        menu_count: number
+        order_count: number
+        rb_count: number
+      }>
+
+      if (rows.length === 0) {
+        await ctx.reply('В системе пока нет ни одного ресторана.')
+        return
+      }
+
+      const currentRestaurant = restaurantRepo.findByChatId(chatId)
+
+      let message = '🧪 <b>Рестораны в системе</b> (тестовый режим)\n\n'
+      message += 'Используйте это меню только для отладки, например, чтобы удалить лишний ресторан.\n\n'
+
+      for (const r of rows) {
+        const isCurrent = currentRestaurant && currentRestaurant.id === r.id
+        const flag = isCurrent ? ' (этот чат)' : ''
+        message += `🍽️ <b>${escapeHtml(r.name)}</b>${flag}\n`
+        message += `ID: <code>${r.id}</code>\n`
+        message += `chat_id: <code>${r.chat_id ?? '—'}</code>\n`
+        message += `Блюд: <b>${r.menu_count}</b>, заказов: <b>${r.order_count}</b>, связей со зданиями: <b>${r.rb_count}</b>\n\n`
+      }
+
+      const keyboard = new InlineKeyboard()
+      for (const r of rows) {
+        const isCurrent = currentRestaurant && currentRestaurant.id === r.id
+        const label = isCurrent
+          ? `🚫 Нельзя удалить: ${r.name} (этот чат)`
+          : `🗑️ Удалить: ${r.name} (ID ${r.id})`
+
+        if (isCurrent) {
+          // Кнопка-заглушка, чтобы явно подсветить, что этот ресторан удалить нельзя из текущего чата
+          keyboard.text(label, 'noop').row()
+        } else {
+          keyboard.text(label, `delete_restaurant:${r.id}`).row()
+        }
+      }
+
+      await ctx.reply(message, { parse_mode: 'HTML', reply_markup: keyboard })
+    } catch (error) {
+      logger.error('Ошибка в команде /restaurants_admin', { error })
+      await ctx.reply('❌ Произошла ошибка при получении списка ресторанов. Попробуйте ещё раз.')
+    }
   })
 
   // Команда /payment — настройка ссылки для оплаты по СБП
