@@ -7,7 +7,7 @@ export const ORDER_CONFIG = {
   deliveryPriceCentsWhenNotFull: 8300,
   deliverySlots: [
     { id: '13:00', time: '13:00' },
-    { id: '17:43', time: '17:43' },
+    { id: '18:45', time: '18:45' },
     { id: '23:00', time: '23:00' },
   ],
 }
