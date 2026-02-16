@@ -1204,13 +1204,18 @@ export function createBot(
           try {
             const buildings = db.prepare('SELECT * FROM buildings').all() as Array<{ id: number; name: string }>
             const coworking = buildings.find((b) => b.name === 'Коворкинг')
-            const coworkingBuilding =
-              coworking ??
+
+            let coworkingBuilding: { id: number; name: string }
+            if (coworking) {
+              coworkingBuilding = coworking
+            } else {
               db
                 .prepare('INSERT INTO buildings (name, address) VALUES (?, ?)')
-                .run('Коворкинг', 'Дефолтный адрес коворкинга') && (db
+                .run('Коворкинг', 'Дефолтный адрес коворкинга')
+              coworkingBuilding = db
                 .prepare('SELECT * FROM buildings WHERE name = ?')
-                .get('Коворкинг') as { id: number; name: string })
+                .get('Коворкинг') as { id: number; name: string }
+            }
 
             const restaurants = db.prepare('SELECT * FROM restaurants').all() as any[]
             let restaurant: any
