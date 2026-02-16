@@ -11,6 +11,7 @@ import { DraftRepository } from '../db/repository-drafts'
 import { VisionService } from '../services/vision'
 import { logger } from '../utils/logger'
 import { MENU_CATEGORIES_ORDER, detectCategory, isBreakfastDish } from '../db/constants'
+import type { MenuItem } from '../types'
 import Database from 'better-sqlite3'
 import fs from 'fs'
 import path from 'path'
@@ -131,6 +132,15 @@ export function createBot(
     for (const item of items) {
       deleteItemImage(item.image_url)
     }
+  }
+
+  /** Приводит название блюда к нормализованному виду для поиска дублей */
+  function normalizeItemName(name: string): string {
+    return name
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .replace(/[.,!?:;"'«»]/g, '')
+      .trim()
   }
 
   function getHelpText(): string {
@@ -1429,35 +1439,77 @@ export function createBot(
         await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
         return
       }
-
-      // Удаляем старое меню и связанные изображения (если есть) и сохраняем новое
-      deleteAllItemImages(restaurant.id)
-      menuRepo.deleteAllByRestaurantId(restaurant.id)
-
-      for (const item of enrichedItems) {
-        menuRepo.createItem({
-          restaurant_id: restaurant.id,
-          name: item.name,
-          price: item.price,
-          description: item.description,
-          category: item.category,
-          is_breakfast: item.is_breakfast,
-          is_available: true,
-        })
+      const existingItems = menuRepo.findByRestaurantId(restaurant.id)
+      const itemsByName = new Map<string, MenuItem>()
+      for (const existing of existingItems) {
+        itemsByName.set(normalizeItemName(existing.name), existing)
       }
 
+      let createdCount = 0
+      let updatedCount = 0
+      let priceChangedCount = 0
+
+      for (const item of enrichedItems) {
+        const key = normalizeItemName(item.name)
+        const existing = itemsByName.get(key)
+
+        if (!existing) {
+          const created = menuRepo.createItem({
+            restaurant_id: restaurant.id,
+            name: item.name,
+            price: item.price,
+            description: item.description,
+            category: item.category,
+            is_breakfast: item.is_breakfast,
+            is_available: true,
+          })
+          itemsByName.set(key, created)
+          createdCount += 1
+          continue
+        }
+
+        const updates: Partial<Omit<MenuItem, 'id' | 'created_at' | 'restaurant_id'>> = {}
+
+        if (existing.price !== item.price) {
+          updates.price = item.price
+          priceChangedCount += 1
+        }
+        if (item.description !== undefined && item.description !== existing.description) {
+          updates.description = item.description
+        }
+        if (item.category !== undefined && item.category !== existing.category) {
+          updates.category = item.category
+        }
+        if (item.is_breakfast !== undefined && item.is_breakfast !== existing.is_breakfast) {
+          updates.is_breakfast = item.is_breakfast
+        }
+
+        if (Object.keys(updates).length > 0) {
+          menuRepo.updateItem(existing.id, updates)
+          updatedCount += 1
+        }
+      }
+
+      const finalItems = menuRepo.findByRestaurantId(restaurant.id)
+
       // Группируем блюда по категориям для красивого вывода
-      const itemsByCategory = enrichedItems.reduce((acc, item) => {
+      const itemsByCategory = finalItems.reduce((acc, item) => {
         const category = item.category || 'Другое'
         if (!acc[category]) {
           acc[category] = []
         }
         acc[category].push(item)
         return acc
-      }, {} as Record<string, typeof enrichedItems>)
+      }, {} as Record<string, MenuItem[]>)
 
       // Формируем сообщение с результатом
-      let message = `✅ Распознано блюд: ${enrichedItems.length}\n\n📋 Ваше меню:\n\n`
+      let message =
+        `✅ Обновлено меню по фото.\n\n` +
+        `Всего распознано на этом фото: ${enrichedItems.length}\n` +
+        `Добавлено новых блюд: ${createdCount}\n` +
+        `Обновлено существующих: ${updatedCount}` +
+        (priceChangedCount > 0 ? ` (цена изменена у ${priceChangedCount})` : '') +
+        `\n\n📋 Текущее меню:\n\n`
       
       // Выводим блюда по категориям
       for (const [category, items] of Object.entries(itemsByCategory)) {
@@ -1473,8 +1525,8 @@ export function createBot(
       }
 
       message += 'Меню сохранено в базу данных! 🎉\n\n'
-      message += '💡 Используйте /menu для просмотра меню по категориям\n'
-      message += '📷 Используйте /photos чтобы добавить фотографии к блюдам'
+      message += '💡 Можно отправлять следующие фото страниц меню — новые блюда добавятся, а существующие обновятся по названию.\n'
+      message += '📷 Используйте /photos чтобы добавить или заменить фотографии у позиций'
 
       await ctx.reply(message, { parse_mode: 'Markdown' })
     } catch (error) {
