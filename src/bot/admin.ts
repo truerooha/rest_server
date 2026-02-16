@@ -1258,9 +1258,16 @@ export function createBot(
             // Связи ресторан–здание
             db.prepare('DELETE FROM restaurant_buildings WHERE restaurant_id = ?').run(restaurantId)
             // Черновики, привязанные к ресторану
-            db.prepare(
-              'UPDATE user_drafts SET restaurant_id = NULL, items = ? WHERE restaurant_id = ?',
-            ).run('[]', restaurantId)
+            try {
+              db.prepare(
+                'UPDATE user_drafts SET restaurant_id = NULL, items = ? WHERE restaurant_id = ?',
+              ).run('[]', restaurantId)
+            } catch (e) {
+              // В старых схемах таблицы user_drafts может не быть — игнорируем эту ошибку
+              if (!(e instanceof Error && e.message.includes('no such table'))) {
+                throw e
+              }
+            }
             // Сам ресторан
             db.prepare('DELETE FROM restaurants WHERE id = ?').run(restaurantId)
           })
