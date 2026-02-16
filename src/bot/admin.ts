@@ -1161,7 +1161,7 @@ export function createBot(
         await ctx.answerCallbackQuery('Отменено')
       }
 
-      // [ТЕСТ] Подтверждение полной очистки базы
+      // [ТЕСТ] Подтверждение полной очистки базы + повторная инициализация дефолтных данных
       else if (data === 'confirm_wipeall') {
         try {
           // Удаляем все файлы изображений
@@ -1178,6 +1178,10 @@ export function createBot(
           }
           const deleteAll = db.transaction(() => {
             const tables = [
+              // Лобби слотов / групповые заказы
+              'slot_lobby_reservations',
+              'group_orders',
+              // Основные сущности
               'orders',
               'menu_items',
               'restaurant_buildings',
@@ -1195,7 +1199,63 @@ export function createBot(
             }
           })
           deleteAll()
-          await ctx.editMessageText('✅ [ТЕСТ] Вся база очищена.')
+          // После полной очистки заново создаём дефолтные данные,
+          // как это делает эндпоинт /api/init-default-data
+          try {
+            const buildings = db.prepare('SELECT * FROM buildings').all() as Array<{ id: number; name: string }>
+            const coworking = buildings.find((b) => b.name === 'Коворкинг')
+            const coworkingBuilding =
+              coworking ??
+              db
+                .prepare('INSERT INTO buildings (name, address) VALUES (?, ?)')
+                .run('Коворкинг', 'Дефолтный адрес коворкинга') && (db
+                .prepare('SELECT * FROM buildings WHERE name = ?')
+                .get('Коворкинг') as { id: number; name: string })
+
+            const restaurants = db.prepare('SELECT * FROM restaurants').all() as any[]
+            let restaurant: any
+
+            if (restaurants.length === 0) {
+              const result = db
+                .prepare('INSERT INTO restaurants (name, chat_id) VALUES (?, ?)')
+                .run('Фудкорнер', 123456789)
+              restaurant = {
+                id: result.lastInsertRowid as number,
+                name: 'Фудкорнер',
+              }
+            } else {
+              restaurant = restaurants[0]
+              if (restaurant.name !== 'Фудкорнер') {
+                db.prepare('UPDATE restaurants SET name = ? WHERE id = ?').run('Фудкорнер', restaurant.id)
+                restaurant.name = 'Фудкорнер'
+              }
+            }
+
+            const existingLink = db
+              .prepare('SELECT * FROM restaurant_buildings WHERE restaurant_id = ? AND building_id = ?')
+              .get(restaurant.id, coworkingBuilding.id)
+
+            if (!existingLink) {
+              db
+                .prepare(
+                  'INSERT OR IGNORE INTO restaurant_buildings (restaurant_id, building_id) VALUES (?, ?)',
+                )
+                .run(restaurant.id, coworkingBuilding.id)
+            }
+
+            await ctx.editMessageText(
+              '✅ [ТЕСТ] Вся база очищена и заново инициализирована дефолтными данными.\n\n' +
+                `Здание: ${coworkingBuilding.name}\n` +
+                `Ресторан: ${restaurant.name}`,
+            )
+          } catch (seedError) {
+            logger.error('Ошибка повторной инициализации после wipeall', { error: seedError })
+            await ctx.editMessageText(
+              '✅ [ТЕСТ] Вся база очищена.\n\n' +
+                '⚠️ Ошибка при автоматической инициализации дефолтных данных.\n' +
+                'Повтори инициализацию через /api/init-default-data.',
+            )
+          }
           await ctx.answerCallbackQuery('Готово')
         } catch (error) {
           const err = error instanceof Error ? error.message : String(error)
