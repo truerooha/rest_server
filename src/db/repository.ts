@@ -180,6 +180,14 @@ export class MenuRepository {
       .run(id)
   }
 
+  /** Переименовывает категорию для всех блюд ресторана. Возвращает количество обновлённых записей. */
+  renameCategory(restaurantId: number, oldCategory: string, newCategory: string): number {
+    const result = this.db
+      .prepare('UPDATE menu_items SET category = ? WHERE restaurant_id = ? AND category = ?')
+      .run(newCategory.trim(), restaurantId, oldCategory)
+    return result.changes
+  }
+
   toggleAvailability(id: number): void {
     this.db
       .prepare('UPDATE menu_items SET is_available = NOT is_available WHERE id = ?')

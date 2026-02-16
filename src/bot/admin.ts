@@ -111,6 +111,8 @@ export function createBot(
   const awaitingRestaurantName = new Set<number>()
   const awaitingPhotoForItem = new Map<number, number>() // chatId → menuItemId
   const awaitingSbpLink = new Set<number>() // chatId
+  const awaitingRenameCategory = new Map<number, { oldCategory: string }>()
+  const pendingRenameCategories = new Map<number, string[]>() // chatId → список категорий для inline-кнопок
 
   /** Удаляет файл изображения блюда с диска, если он существует */
   function deleteItemImage(imageUrl: string | undefined | null): void {
@@ -158,6 +160,7 @@ export function createBot(
       `/delete - удалить блюдо\n` +
       `/stoplist - управление доступностью блюд\n` +
       `/edit - редактировать блюдо\n` +
+      `/rename_category - переименовать категорию (для всех блюд)\n` +
       `/photos - добавить фотографии к блюдам\n\n` +
       `**Настройки:**\n` +
       `/payment - ссылка для оплаты по СБП\n\n` +
@@ -536,6 +539,10 @@ export function createBot(
     } else if (awaitingSbpLink.has(chatId)) {
       awaitingSbpLink.delete(chatId)
       await ctx.reply('❌ Ввод ссылки СБП отменён')
+    } else if (awaitingRenameCategory.has(chatId)) {
+      awaitingRenameCategory.delete(chatId)
+      pendingRenameCategories.delete(chatId)
+      await ctx.reply('❌ Переименование категории отменено')
     } else if (userStates.has(chatId)) {
       userStates.delete(chatId)
       await ctx.reply('❌ Операция отменена')
@@ -1040,6 +1047,43 @@ export function createBot(
         )
 
         await ctx.answerCallbackQuery('Категория изменена!')
+      }
+
+      // Выбор категории для переименования
+      else if (data.startsWith('rename_cat:')) {
+        const chatId = ctx.chat?.id
+        if (!chatId) return
+
+        const suffix = data.replace('rename_cat:', '')
+        if (suffix === 'cancel') {
+          pendingRenameCategories.delete(chatId)
+          awaitingRenameCategory.delete(chatId)
+          await ctx.editMessageText('Отменено.')
+          await ctx.answerCallbackQuery()
+          return
+        }
+
+        const index = parseInt(suffix, 10)
+        const categories = pendingRenameCategories.get(chatId)
+        if (!categories || isNaN(index) || index < 0 || index >= categories.length) {
+          await ctx.answerCallbackQuery('Сессия истекла. Отправьте /rename_category заново.')
+          return
+        }
+
+        const oldCategory = categories[index]
+        awaitingRenameCategory.set(chatId, { oldCategory })
+        pendingRenameCategories.delete(chatId)
+
+        const restaurant = restaurantRepo.findByChatId(chatId)
+        const count = restaurant ? menuRepo.findByCategoryAndRestaurantId(oldCategory, restaurant.id).length : 0
+
+        await ctx.editMessageText(
+          `✏️ Переименование категории «${escapeHtml(oldCategory)}»\n\n` +
+            `Блюд в категории: ${count}\n\n` +
+            `Введите новое название категории (короткое, для отображения в интерфейсе):`,
+          { parse_mode: 'HTML' }
+        )
+        await ctx.answerCallbackQuery()
       }
 
       // Загрузка нового фото из редактирования
@@ -1824,6 +1868,43 @@ export function createBot(
     }
   })
 
+  // Команда /rename_category - переименовать категорию для всех блюд
+  bot.command('rename_category', async (ctx: Context) => {
+    try {
+      const chatId = ctx.chat?.id
+      if (!chatId) return
+
+      const restaurant = restaurantRepo.findByChatId(chatId)
+      if (!restaurant) {
+        await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
+        return
+      }
+
+      const categories = menuRepo.getAllCategories(restaurant.id)
+      if (categories.length === 0) {
+        await ctx.reply('Меню пусто — нет категорий для переименования.')
+        return
+      }
+
+      const keyboard = new InlineKeyboard()
+      categories.forEach((category, index) => {
+        const itemsCount = menuRepo.findByCategoryAndRestaurantId(category, restaurant.id).length
+        keyboard.text(`${category} (${itemsCount})`, `rename_cat:${index}`)
+      })
+      keyboard.row().text('❌ Отмена', 'rename_cat:cancel')
+
+      pendingRenameCategories.set(chatId, categories)
+      await ctx.reply(
+        '✏️ <b>Переименовать категорию</b>\n\n' +
+          'Выберите категорию, которую нужно переименовать. Новое название применится ко всем блюдам этой категории.',
+        { parse_mode: 'HTML', reply_markup: keyboard }
+      )
+    } catch (error) {
+      logger.error('Ошибка в команде /rename_category', { error })
+      await ctx.reply('❌ Произошла ошибка. Попробуйте ещё раз.')
+    }
+  })
+
   // Команда /breakfasts - показать только завтраки
   bot.command('breakfasts', async (ctx: Context) => {
     try {
@@ -2096,6 +2177,31 @@ export function createBot(
         `✅ Ссылка СБП сохранена!\n\n` +
         `💳 ${link}\n\n` +
         `Клиенты будут использовать эту ссылку для оплаты заказов.`
+      )
+      return
+    }
+
+    // Ожидание нового названия категории при /rename_category
+    const renameState = awaitingRenameCategory.get(chatId)
+    if (renameState) {
+      const newCategory = text.trim()
+      if (!newCategory || newCategory.length > 50) {
+        await ctx.reply('Введите короткое название категории (до 50 символов).')
+        return
+      }
+      awaitingRenameCategory.delete(chatId)
+      const restaurant = restaurantRepo.findByChatId(chatId)
+      if (!restaurant) {
+        await ctx.reply('❌ Ресторан не найден.')
+        return
+      }
+      const updated = menuRepo.renameCategory(restaurant.id, renameState.oldCategory, newCategory)
+      await ctx.reply(
+        `✅ Категория переименована!\n\n` +
+          `«${renameState.oldCategory}» → «${newCategory}»\n` +
+          `Обновлено блюд: ${updated}\n\n` +
+          `/menu - посмотреть меню\n` +
+          `/categories - статистика по категориям`
       )
       return
     }

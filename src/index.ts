@@ -139,6 +139,7 @@ async function main() {
         { command: 'menu', description: 'Меню по категориям' },
         { command: 'add', description: 'Добавить блюдо' },
         { command: 'edit', description: 'Редактировать блюдо' },
+        { command: 'rename_category', description: 'Переименовать категорию' },
         { command: 'delete', description: 'Удалить блюдо' },
       ])
       adminBot.start()

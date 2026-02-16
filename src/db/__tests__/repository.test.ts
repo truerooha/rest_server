@@ -381,6 +381,43 @@ describe('MenuRepository', () => {
     })
   })
 
+  describe('renameCategory', () => {
+    it('должен переименовать категорию для всех блюд ресторана', () => {
+      menuRepo.createItem({
+        restaurant_id: restaurantId,
+        name: 'Борщ',
+        price: 250,
+        category: 'Длинное название категории',
+        is_breakfast: false,
+        is_available: true,
+      })
+      menuRepo.createItem({
+        restaurant_id: restaurantId,
+        name: 'Солянка',
+        price: 280,
+        category: 'Длинное название категории',
+        is_breakfast: false,
+        is_available: true,
+      })
+      menuRepo.createItem({
+        restaurant_id: restaurantId,
+        name: 'Салат',
+        price: 350,
+        category: 'Салаты',
+        is_breakfast: false,
+        is_available: true,
+      })
+
+      const updated = menuRepo.renameCategory(restaurantId, 'Длинное название категории', 'Супы')
+      expect(updated).toBe(2)
+
+      const soups = menuRepo.findByCategoryAndRestaurantId('Супы', restaurantId)
+      expect(soups).toHaveLength(3)
+      const oldCat = menuRepo.findByCategoryAndRestaurantId('Длинное название категории', restaurantId)
+      expect(oldCat).toHaveLength(0)
+    })
+  })
+
   describe('findAvailableByRestaurantId', () => {
     it('должен находить только доступные блюда', () => {
       menuRepo.createItem({
