@@ -434,6 +434,26 @@ export class OrderRepository {
       .all(deliverySlot, buildingId, restaurantId, orderDate, orderDate) as Order[]
   }
 
+  /** Заказы принятого группового заказа (restaurant_confirmed, preparing) для кнопки Готово */
+  findAcceptedForGroup(
+    deliverySlot: string,
+    buildingId: number,
+    restaurantId: number,
+    orderDate: string,
+  ): Order[] {
+    return this.db
+      .prepare(`
+        SELECT * FROM orders
+        WHERE delivery_slot = ?
+          AND building_id = ?
+          AND restaurant_id = ?
+          AND status IN ('restaurant_confirmed', 'preparing')
+          AND (order_date = ? OR (order_date IS NULL AND date(created_at) = ?))
+        ORDER BY created_at DESC
+      `)
+      .all(deliverySlot, buildingId, restaurantId, orderDate, orderDate) as Order[]
+  }
+
   updateStatusBatch(orderIds: number[], status: OrderStatus): void {
     const stmt = this.db.prepare('UPDATE orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
     for (const id of orderIds) {

@@ -328,7 +328,7 @@ export function createBot(
     }
     const groupId = parseInt(parts[1], 10)
     const action = parts[2]
-    if (!Number.isFinite(groupId) || !['accept', 'reject'].includes(action)) {
+    if (!Number.isFinite(groupId) || !['accept', 'reject', 'ready'].includes(action)) {
       await ctx.answerCallbackQuery()
       return
     }
@@ -346,7 +346,44 @@ export function createBot(
       return
     }
     const groupOrder = groupOrderRepo.findById(groupId)
-    if (!groupOrder || groupOrder.restaurant_id !== restaurant.id || groupOrder.status !== 'pending_restaurant') {
+    if (!groupOrder || groupOrder.restaurant_id !== restaurant.id) {
+      await ctx.answerCallbackQuery({ text: 'Заказ не найден' })
+      return
+    }
+    if (action === 'ready') {
+      if (groupOrder.status !== 'accepted') {
+        await ctx.answerCallbackQuery({ text: 'Заказ уже обработан или не принят' })
+        return
+      }
+      const orders = orderRepo.findAcceptedForGroup(
+        groupOrder.delivery_slot,
+        groupOrder.building_id,
+        groupOrder.restaurant_id,
+        groupOrder.order_date,
+      )
+      if (orders.length === 0) {
+        await ctx.answerCallbackQuery({ text: 'Заказы не найдены' })
+        return
+      }
+      orderRepo.updateStatusBatch(orders.map((o) => o.id), 'ready')
+      await ctx.answerCallbackQuery({ text: 'Отмечено: готово' })
+      try {
+        const msg = ctx.callbackQuery?.message
+        if (msg && 'message_id' in msg) {
+          await ctx.api.editMessageReplyMarkup(chatId, msg.message_id, { reply_markup: { inline_keyboard: [] } })
+        }
+      } catch {
+        // Игнорируем ошибки редактирования (например, сообщение устарело)
+      }
+      for (const order of orders) {
+        const user = userRepo.findById(order.user_id)
+        if (notifyUser && user) {
+          await notifyUser(user.telegram_user_id, '🍽️ Ваш заказ готов!')
+        }
+      }
+      return
+    }
+    if (groupOrder.status !== 'pending_restaurant') {
       await ctx.answerCallbackQuery({ text: 'Заказ уже обработан или не найден' })
       return
     }
@@ -367,7 +404,8 @@ export function createBot(
       try {
         const msg = ctx.callbackQuery?.message
         if (msg && 'message_id' in msg) {
-          await ctx.api.editMessageReplyMarkup(chatId, msg.message_id, { reply_markup: { inline_keyboard: [] } })
+          const keyboard = new InlineKeyboard().text('🍽️ Готово', `group:${groupId}:ready`)
+          await ctx.api.editMessageReplyMarkup(chatId, msg.message_id, { reply_markup: keyboard })
         }
       } catch {
         // Игнорируем ошибки редактирования (например, сообщение устарело)
