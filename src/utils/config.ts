@@ -22,6 +22,9 @@ const envSchema = z.object({
   DISABLE_MIGRATIONS: z.string().optional(),
   MIN_LOBBY_PARTICIPANTS: z.string().optional(),
   UPLOADS_PATH: z.string().optional(),
+  PLATFORM_BOT_TOKEN: z.string().optional(),
+  PLATFORM_ADMIN_IDS: z.string().optional(),
+  DISABLE_PLATFORM_BOT: z.string().optional(),
 })
 
 const parsedEnv = envSchema.safeParse(process.env)
@@ -67,6 +70,11 @@ export const config = {
   ),
   /** Путь к директории загруженных изображений. Railway: /data/uploads, локально: ./uploads */
   uploadsPath: env.UPLOADS_PATH || './uploads',
+  platformBotToken: env.PLATFORM_BOT_TOKEN,
+  platformAdminIds: env.PLATFORM_ADMIN_IDS
+    ? env.PLATFORM_ADMIN_IDS.split(',').map((id) => parseInt(id.trim(), 10)).filter(Number.isFinite)
+    : [],
+  disablePlatformBot: parseBooleanFlag(env.DISABLE_PLATFORM_BOT),
 }
 
 // Внимание:

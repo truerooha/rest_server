@@ -26,6 +26,8 @@ export interface Building {
   id: number
   name: string
   address: string
+  invite_code?: string
+  invite_code_active?: number
   created_at: string
 }
 
@@ -36,6 +38,7 @@ export interface User {
   first_name?: string
   last_name?: string
   building_id?: number
+  is_approved?: number
   created_at: string
 }
 
@@ -78,6 +81,17 @@ export interface RestaurantBuilding {
   id: number
   restaurant_id: number
   building_id: number
+  created_at: string
+}
+
+export type RestaurantAdminRole = 'owner' | 'admin'
+
+export interface RestaurantAdmin {
+  id: number
+  restaurant_id: number
+  telegram_user_id: number
+  role: RestaurantAdminRole
+  added_by_telegram_id?: number
   created_at: string
 }
 

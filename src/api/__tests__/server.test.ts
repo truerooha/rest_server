@@ -156,6 +156,7 @@ describe('HTTP API server', () => {
     const buildingRepo = new BuildingRepository(db)
 
     const user = userRepo.create({ telegram_user_id: 12345 })
+    userRepo.approve(12345)
     const restaurant = restaurantRepo.findOrCreateByChatId(11111, 'Столовая')
     const building = buildingRepo.create({ name: 'Офис', address: 'Адрес' })
 
@@ -189,6 +190,89 @@ describe('HTTP API server', () => {
     expect(res.status).toBe(400)
     expect(res.body.success).toBe(false)
     expect(res.body.error).toContain('Missing required fields')
+  })
+
+  it('POST /api/orders возвращает 403 user_not_approved для неодобренного пользователя', async () => {
+    const app = createApp()
+    const userRepo = new UserRepository(db)
+    const restaurantRepo = new RestaurantRepository(db)
+    const buildingRepo = new BuildingRepository(db)
+
+    const user = userRepo.create({ telegram_user_id: 99999 })
+    const restaurant = restaurantRepo.findOrCreateByChatId(22222, 'Кафе')
+    const building = buildingRepo.create({ name: 'Здание', address: 'Адрес' })
+
+    const res = await request(app)
+      .post('/api/orders')
+      .send({
+        user_id: user.id,
+        restaurant_id: restaurant.id,
+        building_id: building.id,
+        items: [{ menu_item_id: 1, name: 'Чай', price: 50, quantity: 1 }],
+        total_price: 50,
+        delivery_slot: '12:00-13:00',
+      })
+
+    expect(res.status).toBe(403)
+    expect(res.body.success).toBe(false)
+    expect(res.body.error).toBe('user_not_approved')
+  })
+
+  it('PUT /api/draft возвращает 403 user_not_approved для неодобренного telegram_user_id', async () => {
+    const app = createApp()
+    const userRepo = new UserRepository(db)
+    const user = userRepo.create({ telegram_user_id: 88888 })
+
+    const res = await request(app)
+      .put('/api/draft')
+      .send({
+        telegram_user_id: user.telegram_user_id,
+        delivery_slot: '12:00-13:00',
+        restaurant_id: 1,
+        building_id: 1,
+        items: [{ menu_item_id: 1, name: 'Чай', price: 50, quantity: 1 }],
+      })
+
+    expect(res.status).toBe(403)
+    expect(res.body.success).toBe(false)
+    expect(res.body.error).toBe('user_not_approved')
+  })
+
+  it('POST /api/auth/join успешно связывает пользователя с зданием по invite-коду', async () => {
+    const app = createApp()
+    const buildingRepo = new BuildingRepository(db)
+    const building = buildingRepo.create({ name: 'Офис', address: 'ул. Мира 1' })
+    buildingRepo.regenerateInviteCode(building.id)
+    const updated = buildingRepo.findById(building.id)!
+    const inviteCode = updated.invite_code!
+    expect(inviteCode).toBeTruthy()
+
+    const res = await request(app)
+      .post('/api/auth/join')
+      .send({ telegram_user_id: 77777, invite_code: inviteCode })
+
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(res.body.data.telegram_user_id).toBe(77777)
+    expect(res.body.data.building_id).toBe(building.id)
+    expect(res.body.data.is_approved).toBe(1)
+
+    const userRepo = new UserRepository(db)
+    const user = userRepo.findByTelegramId(77777)!
+    expect(user.building_id).toBe(building.id)
+    expect(user.is_approved).toBe(1)
+  })
+
+  it('POST /api/auth/join возвращает invalid_invite_code для несуществующего кода', async () => {
+    const app = createApp()
+
+    const res = await request(app)
+      .post('/api/auth/join')
+      .send({ telegram_user_id: 66666, invite_code: 'INVALID' })
+
+    expect(res.status).toBe(404)
+    expect(res.body.success).toBe(false)
+    expect(res.body.error).toBe('invalid_invite_code')
   })
 
   // Тесты, связанные с системой кредитов/баллов, удалены: модель кредитов больше не используется.

@@ -10,7 +10,10 @@ import {
   OrderStatus,
   GroupOrder,
   GroupOrderStatus,
+  RestaurantAdmin,
+  RestaurantAdminRole,
 } from '../types'
+import { generateInviteCode } from './migrations/migrate'
 import { getTodayInAppTz } from '../utils/timezone'
 
 export class RestaurantRepository {
@@ -260,6 +263,34 @@ export class BuildingRepository {
       .prepare('DELETE FROM buildings WHERE id = ?')
       .run(id)
   }
+
+  findByInviteCode(code: string): Building | undefined {
+    return this.db
+      .prepare('SELECT * FROM buildings WHERE invite_code = ? AND invite_code_active = 1')
+      .get(code.toUpperCase()) as Building | undefined
+  }
+
+  updateInviteCode(id: number, code: string): void {
+    this.db
+      .prepare('UPDATE buildings SET invite_code = ? WHERE id = ?')
+      .run(code.toUpperCase(), id)
+  }
+
+  regenerateInviteCode(id: number): string {
+    let code: string
+    let attempts = 0
+    do {
+      code = generateInviteCode()
+      attempts++
+    } while (
+      attempts < 100 &&
+      this.db.prepare('SELECT 1 FROM buildings WHERE invite_code = ?').get(code)
+    )
+    this.db
+      .prepare('UPDATE buildings SET invite_code = ? WHERE id = ?')
+      .run(code, id)
+    return code
+  }
 }
 
 export class UserRepository {
@@ -339,6 +370,72 @@ export class UserRepository {
     this.db
       .prepare(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`)
       .run(...values)
+  }
+
+  approve(telegramUserId: number): void {
+    this.db
+      .prepare('UPDATE users SET is_approved = 1 WHERE telegram_user_id = ?')
+      .run(telegramUserId)
+  }
+
+  block(telegramUserId: number): void {
+    this.db
+      .prepare('UPDATE users SET is_approved = 0 WHERE telegram_user_id = ?')
+      .run(telegramUserId)
+  }
+
+  findApprovedByBuildingId(buildingId: number): User[] {
+    return this.db
+      .prepare('SELECT * FROM users WHERE building_id = ? AND is_approved = 1 ORDER BY first_name')
+      .all(buildingId) as User[]
+  }
+
+  findAll(): User[] {
+    return this.db
+      .prepare('SELECT * FROM users ORDER BY created_at DESC')
+      .all() as User[]
+  }
+}
+
+export class RestaurantAdminRepository {
+  constructor(private db: Database.Database) {}
+
+  isAdmin(telegramUserId: number): boolean {
+    const row = this.db
+      .prepare('SELECT 1 FROM restaurant_admins WHERE telegram_user_id = ?')
+      .get(telegramUserId)
+    return !!row
+  }
+
+  findByTelegramId(telegramUserId: number): RestaurantAdmin[] {
+    return this.db
+      .prepare('SELECT * FROM restaurant_admins WHERE telegram_user_id = ?')
+      .all(telegramUserId) as RestaurantAdmin[]
+  }
+
+  findByRestaurantId(restaurantId: number): RestaurantAdmin[] {
+    return this.db
+      .prepare('SELECT * FROM restaurant_admins WHERE restaurant_id = ?')
+      .all(restaurantId) as RestaurantAdmin[]
+  }
+
+  grant(restaurantId: number, telegramUserId: number, role: RestaurantAdminRole = 'admin', addedBy?: number): RestaurantAdmin {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO restaurant_admins (restaurant_id, telegram_user_id, role, added_by_telegram_id)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(restaurantId, telegramUserId, role, addedBy ?? null)
+    return this.db
+      .prepare('SELECT * FROM restaurant_admins WHERE restaurant_id = ? AND telegram_user_id = ?')
+      .get(restaurantId, telegramUserId) as RestaurantAdmin
+  }
+
+  revoke(restaurantId: number, telegramUserId: number): boolean {
+    const result = this.db
+      .prepare('DELETE FROM restaurant_admins WHERE restaurant_id = ? AND telegram_user_id = ?')
+      .run(restaurantId, telegramUserId)
+    return result.changes > 0
   }
 }
 

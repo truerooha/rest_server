@@ -6,6 +6,7 @@ import {
   UserRepository,
   GroupOrderRepository,
   BuildingRepository,
+  RestaurantAdminRepository,
 } from '../db/repository'
 import { DraftRepository } from '../db/repository-drafts'
 import { VisionService } from '../services/vision'
@@ -105,7 +106,21 @@ export function createBot(
   const draftRepo = new DraftRepository(db)
   const groupOrderRepo = new GroupOrderRepository(db)
   const buildingRepo = new BuildingRepository(db)
+  const restaurantAdminRepo = new RestaurantAdminRepository(db)
   const notifyUser = options?.notifyUser
+
+  // Access control: only whitelisted restaurant admins can use the bot
+  bot.use(async (ctx, next) => {
+    const chatId = ctx.from?.id
+    if (!chatId) {
+      return
+    }
+    if (!restaurantAdminRepo.isAdmin(chatId)) {
+      await ctx.reply('Доступ запрещён. Обратитесь к администратору платформы.')
+      return
+    }
+    await next()
+  })
 
   const userStates = new Map<number, UserState>()
   const awaitingRestaurantName = new Set<number>()

@@ -11,6 +11,7 @@ import {
   RestaurantBuildingRepository,
   OrderRepository,
   LobbyRepository,
+  RestaurantAdminRepository,
 } from '../db/repository'
 import { DraftRepository } from '../db/repository-drafts'
 import { ORDER_CONFIG } from '../utils/order-config'
@@ -29,6 +30,7 @@ export interface ApiContext {
     order: OrderRepository
     draft: DraftRepository
     lobby: LobbyRepository
+    restaurantAdmin: RestaurantAdminRepository
   }
 }
 
@@ -127,7 +129,39 @@ export function createApiServer(db: Database.Database): Express {
       order: new OrderRepository(db),
       draft: new DraftRepository(db),
       lobby: new LobbyRepository(db),
+      restaurantAdmin: new RestaurantAdminRepository(db),
     },
+  }
+
+  /** Middleware: check that user is approved before write operations */
+  const requireApprovedUser = (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const body = req.body as Record<string, unknown>
+      const telegramUserId =
+        body?.telegram_user_id ??
+        (req.query.telegram_user_id ? parseInt(String(req.query.telegram_user_id)) : null)
+      const internalUserId = body?.user_id ?? body?.userId
+
+      let user = null
+      if (telegramUserId != null && Number.isFinite(Number(telegramUserId))) {
+        user = context.repos.user.findByTelegramId(Number(telegramUserId))
+      } else if (internalUserId != null && Number.isFinite(Number(internalUserId))) {
+        user = context.repos.user.findById(Number(internalUserId))
+      }
+
+      if (!user) {
+        return next()
+      }
+      if (!user.is_approved) {
+        return res.status(403).json({
+          success: false,
+          error: 'user_not_approved',
+        })
+      }
+      next()
+    } catch {
+      next()
+    }
   }
 
   const findRestaurantWithMenu = () => {
@@ -259,7 +293,7 @@ export function createApiServer(db: Database.Database): Express {
   })
 
   // POST /api/lobby/join - присоединиться к лобби слота
-  app.post('/api/lobby/join', (req: Request, res: Response) => {
+  app.post('/api/lobby/join', requireApprovedUser, (req: Request, res: Response) => {
     try {
       const parsed = lobbyJoinSchema.safeParse(req.body)
       if (!parsed.success) {
@@ -543,6 +577,46 @@ export function createApiServer(db: Database.Database): Express {
     }
   })
 
+  // POST /api/auth/join - join with invite code
+  app.post('/api/auth/join', (req: Request, res: Response) => {
+    try {
+      const { telegram_user_id, invite_code } = req.body as {
+        telegram_user_id?: number
+        invite_code?: string
+      }
+      if (!telegram_user_id || !invite_code) {
+        return res.status(400).json({
+          success: false,
+          error: 'telegram_user_id and invite_code are required',
+        })
+      }
+      const building = context.repos.building.findByInviteCode(invite_code)
+      if (!building) {
+        return res.status(404).json({
+          success: false,
+          error: 'invalid_invite_code',
+        })
+      }
+      // Find or create user
+      let user = context.repos.user.findByTelegramId(telegram_user_id)
+      if (!user) {
+        user = context.repos.user.create({
+          telegram_user_id,
+          building_id: building.id,
+        })
+      } else if (user.building_id !== building.id) {
+        context.repos.user.updateBuilding(telegram_user_id, building.id)
+      }
+      context.repos.user.approve(telegram_user_id)
+      // Re-read after updates
+      user = context.repos.user.findByTelegramId(telegram_user_id)!
+      res.json({ success: true, data: user })
+    } catch (error) {
+      logApiError(res, 'Error joining with invite code', error)
+      res.status(500).json({ success: false, error: 'Failed to join' })
+    }
+  })
+
   // PUT /api/user/:telegramId/building - обновить здание пользователя
   app.put('/api/user/:telegramId/building', (req: Request, res: Response) => {
     try {
@@ -592,7 +666,7 @@ export function createApiServer(db: Database.Database): Express {
   })
 
   // PUT /api/draft - сохранить черновик (upsert по telegram_user_id)
-  app.put('/api/draft', (req: Request, res: Response) => {
+  app.put('/api/draft', requireApprovedUser, (req: Request, res: Response) => {
     try {
       const parsed = DraftPayloadSchema.safeParse(req.body)
       if (!parsed.success) {
@@ -780,7 +854,7 @@ export function createApiServer(db: Database.Database): Express {
   })
 
   // POST /api/orders - создать заказ (принимает snake_case или camelCase)
-  app.post('/api/orders', (req: Request, res: Response) => {
+  app.post('/api/orders', requireApprovedUser, (req: Request, res: Response) => {
     try {
       const body = req.body as Record<string, unknown>
       const user_id = body.user_id ?? body.userId

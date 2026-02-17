@@ -4,6 +4,7 @@ import { applyMigrations, ensureSchemaColumns } from './db/migrations/migrate'
 import { VisionService } from './services/vision'
 import { createBot as createAdminBot, formatGroupOrderMessage } from './bot/admin'
 import { createClientBot } from './bot/client'
+import { createPlatformBot } from './bot/platform'
 import { createApiServer } from './api/server'
 import { startDeadlineScheduler } from './services/deadline-scheduler'
 import { UserRepository } from './db/repository'
@@ -63,6 +64,7 @@ async function main() {
     shuttingDown = true
     logger.warn('Получен сигнал завершения', { signal })
     stopDeadlineScheduler?.()
+    platformBot?.stop()
     server.close(() => {
       db.close()
       logger.info('Сервер остановлен')
@@ -178,6 +180,41 @@ async function main() {
   } else if (!config.disableBots && !config.disableClientBot) {
     logger.warn('CLIENT_BOT_TOKEN не указан, клиентский бот не запущен')
   }
+
+  // Запускаем платформенного бота (если есть токен)
+  let platformBot: ReturnType<typeof createPlatformBot> | null = null
+  if (config.disableBots || config.disablePlatformBot) {
+    logger.warn('Platform-бот отключён флагами конфигурации')
+  } else if (config.platformBotToken && config.platformAdminIds.length > 0) {
+    try {
+      logger.info('Запуск platform-бота...')
+      platformBot = createPlatformBot(config.platformBotToken, db, config.platformAdminIds)
+      platformBot.catch((err) => {
+        logger.error('Ошибка в platform-боте', { error: err })
+      })
+      await platformBot.api.setMyCommands([
+        { command: 'start', description: 'Начать / приветствие' },
+        { command: 'help', description: 'Справка по командам' },
+        { command: 'buildings', description: 'Список зданий' },
+        { command: 'add_building', description: 'Добавить здание' },
+        { command: 'restaurants', description: 'Список ресторанов' },
+        { command: 'users', description: 'Список пользователей' },
+      ])
+      platformBot.start()
+        .then(() => {
+          logger.info('Platform-бот запущен')
+        })
+        .catch((err) => {
+          logger.error('Ошибка старта platform-бота', { error: err })
+        })
+    } catch (error) {
+      logger.error('Не удалось запустить platform-бота', { error })
+      logger.warn('Продолжаем работу без platform-бота')
+    }
+  } else if (!config.disableBots && !config.disablePlatformBot) {
+    logger.warn('PLATFORM_BOT_TOKEN или PLATFORM_ADMIN_IDS не указаны, platform-бот не запущен')
+  }
+
   logger.info('Все сервисы инициализированы и готовы к работе')
 }
 
