@@ -188,7 +188,10 @@ async function main() {
   } else if (config.platformBotToken && config.platformAdminIds.length > 0) {
     try {
       logger.info('Запуск platform-бота...')
-      platformBot = createPlatformBot(config.platformBotToken, db, config.platformAdminIds)
+      platformBot = createPlatformBot(config.platformBotToken, db, config.platformAdminIds, {
+        clientBotUsername: config.clientBotUsername,
+        webAppShortName: config.webAppShortName,
+      })
       platformBot.catch((err) => {
         logger.error('Ошибка в platform-боте', { error: err })
       })

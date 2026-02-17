@@ -25,6 +25,10 @@ const envSchema = z.object({
   PLATFORM_BOT_TOKEN: z.string().optional(),
   PLATFORM_ADMIN_IDS: z.string().optional(),
   DISABLE_PLATFORM_BOT: z.string().optional(),
+  /** Username клиентского бота (без @) для генерации ссылок с invite-кодом в Platform Bot */
+  CLIENT_BOT_USERNAME: z.string().optional(),
+  /** Short name Web App из BotFather для ссылки t.me/bot/app?startapp=CODE */
+  WEB_APP_SHORT_NAME: z.string().optional(),
 })
 
 const parsedEnv = envSchema.safeParse(process.env)
@@ -75,6 +79,8 @@ export const config = {
     ? env.PLATFORM_ADMIN_IDS.split(',').map((id) => parseInt(id.trim(), 10)).filter(Number.isFinite)
     : [],
   disablePlatformBot: parseBooleanFlag(env.DISABLE_PLATFORM_BOT),
+  clientBotUsername: env.CLIENT_BOT_USERNAME?.trim() || null,
+  webAppShortName: env.WEB_APP_SHORT_NAME?.trim() || null,
 }
 
 // Внимание:

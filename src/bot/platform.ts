@@ -9,11 +9,19 @@ import {
 } from '../db/repository'
 import { logger } from '../utils/logger'
 
+function buildClientLinkWithCode(username: string, shortName: string, code: string): string {
+  return `https://t.me/${username.replace(/^@/, '')}/${shortName}?startapp=${code}`
+}
+
 export function createPlatformBot(
   token: string,
   db: Database.Database,
   allowedAdminIds: number[],
+  options?: { clientBotUsername: string | null; webAppShortName: string | null },
 ) {
+  const clientBotUsername = options?.clientBotUsername ?? null
+  const webAppShortName = options?.webAppShortName ?? null
+  const canBuildLink = Boolean(clientBotUsername && webAppShortName)
   const bot = new Bot(token)
   const buildingRepo = new BuildingRepository(db)
   const restaurantRepo = new RestaurantRepository(db)
@@ -77,7 +85,11 @@ export function createPlatformBot(
       const users = userRepo.findApprovedByBuildingId(b.id)
       const code = b.invite_code ?? '—'
       const active = b.invite_code_active ? '✅' : '❌'
-      return `#${b.id} ${b.name}\n   📍 ${b.address}\n   🔑 ${code} ${active} | 👥 ${users.length} чел.`
+      let line = `#${b.id} ${b.name}\n   📍 ${b.address}\n   🔑 ${code} ${active} | 👥 ${users.length} чел.`
+      if (canBuildLink && code !== '—' && clientBotUsername && webAppShortName) {
+        line += `\n   🔗 ${buildClientLinkWithCode(clientBotUsername, webAppShortName, code)}`
+      }
+      return line
     })
     await ctx.reply(lines.join('\n\n'))
   })
@@ -103,7 +115,11 @@ export function createPlatformBot(
       return
     }
     const newCode = buildingRepo.regenerateInviteCode(id)
-    await ctx.reply(`Новый invite-код для «${building.name}»: ${newCode}`)
+    let msg = `Новый invite-код для «${building.name}»: ${newCode}`
+    if (canBuildLink && clientBotUsername && webAppShortName) {
+      msg += `\n\n🔗 Ссылка для офиса:\n${buildClientLinkWithCode(clientBotUsername, webAppShortName, newCode)}`
+    }
+    await ctx.reply(msg)
   })
 
   // /restaurants
@@ -263,12 +279,15 @@ export function createPlatformBot(
       awaitingBuildingAddress.delete(chatId)
       const building = buildingRepo.create({ name, address: text })
       const code = buildingRepo.regenerateInviteCode(building.id)
-      await ctx.reply(
+      let msg =
         `✅ Здание создано:\n` +
         `Название: ${building.name}\n` +
         `Адрес: ${text}\n` +
-        `Invite-код: ${code}`,
-      )
+        `Invite-код: ${code}`
+      if (canBuildLink && clientBotUsername && webAppShortName) {
+        msg += `\n\n🔗 Ссылка для офиса:\n${buildClientLinkWithCode(clientBotUsername, webAppShortName, code)}`
+      }
+      await ctx.reply(msg)
       return
     }
   })
