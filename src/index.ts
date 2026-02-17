@@ -11,7 +11,7 @@ import { UserRepository } from './db/repository'
 import { logger } from './utils/logger'
 
 async function main() {
-  logger.info('Запуск сервера "Обед в Офис"', {
+  logger.info('Запуск сервера "Кускус delivery"', {
     nodeEnv: config.nodeEnv,
     apiPort: config.apiPort,
     databasePath: config.databasePath,

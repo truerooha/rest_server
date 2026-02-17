@@ -1,7 +1,7 @@
 {
   "name": "delivery",
   "version": "1.0.0",
-  "description": "Обед в Офис - сервис предзаказа корпоративных обедов",
+  "description": "Кускус delivery - сервис предзаказа корпоративных обедов",
   "main": "index.js",
   "engines": {
     "node": ">=20.0.0",

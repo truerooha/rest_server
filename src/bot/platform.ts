@@ -45,7 +45,7 @@ export function createPlatformBot(
 
   function getHelpText(): string {
     return [
-      '🏢 Платформа «Обед в Офис» — управление',
+      '🏢 Платформа «Кускус delivery» — управление',
       '',
       '📋 Здания:',
       '/buildings — список зданий с invite-кодами',

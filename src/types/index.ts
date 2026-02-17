@@ -1,4 +1,4 @@
-// Типы для проекта "Обед в Офис"
+// Типы для проекта "Кускус delivery"
 
 export interface Restaurant {
   id: number
