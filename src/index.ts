@@ -2,6 +2,7 @@ import { config } from './utils/config'
 import { initDatabase } from './db/schema'
 import { applyMigrations, ensureSchemaColumns } from './db/migrations/migrate'
 import { VisionService } from './services/vision'
+import { InlineKeyboard } from 'grammy'
 import { createBot as createAdminBot, formatGroupOrderMessage } from './bot/admin'
 import { createClientBot } from './bot/client'
 import { createPlatformBot } from './bot/platform'
@@ -40,8 +41,25 @@ async function main() {
     ensureSchemaColumns(db)
   }
 
+  // Создаём клиентского бота первым (нужен для уведомлений)
+  let clientBot: ReturnType<typeof createClientBot> | null = null
+  if (!config.disableBots && !config.disableClientBot && config.clientBotToken) {
+    clientBot = createClientBot(config.clientBotToken, db, config.miniAppUrl)
+  }
+
+  const notifyLobbyActivated = clientBot
+    ? async (telegramUserId: number, slotTime: string) => {
+        const keyboard = new InlineKeyboard().webApp('Открыть приложение', config.miniAppUrl)
+        await clientBot!.api.sendMessage(
+          telegramUserId,
+          `Слот ${slotTime} активирован! Минимум участников набран — выбирайте меню 🎉`,
+          { reply_markup: keyboard },
+        )
+      }
+    : undefined
+
   // Запускаем API сервер для Mini App сразу, чтобы Railway видел порт
-  const apiServer = createApiServer(db)
+  const apiServer = createApiServer(db, { notifyLobbyActivated })
   const port = config.apiPort
   const host = '0.0.0.0'
   
@@ -80,12 +98,6 @@ async function main() {
     : null
   if (!visionService) {
     logger.warn('Vision-сервис не создан: OPENAI_API_KEY отсутствует')
-  }
-
-  // Создаём клиентского бота первым (нужен для уведомлений из админ-бота)
-  let clientBot: ReturnType<typeof createClientBot> | null = null
-  if (!config.disableBots && !config.disableClientBot && config.clientBotToken) {
-    clientBot = createClientBot(config.clientBotToken, db, config.miniAppUrl)
   }
 
   // Создаём и запускаем админ-бота (если есть токен и Vision-сервис)

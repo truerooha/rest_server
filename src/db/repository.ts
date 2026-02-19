@@ -802,6 +802,24 @@ export class LobbyRepository {
     return row.count > 0
   }
 
+  getReservationTelegramIds(
+    buildingId: number,
+    restaurantId: number,
+    deliverySlot: string,
+    orderDate: string,
+  ): number[] {
+    const rows = this.db
+      .prepare(
+        `
+        SELECT u.telegram_user_id FROM slot_lobby_reservations r
+        JOIN users u ON r.user_id = u.id
+        WHERE r.building_id = ? AND r.restaurant_id = ? AND r.delivery_slot = ? AND r.order_date = ?
+      `,
+      )
+      .all(buildingId, restaurantId, deliverySlot, orderDate) as { telegram_user_id: number }[]
+    return rows.map((r) => r.telegram_user_id)
+  }
+
   deleteReservationsForSlot(
     buildingId: number,
     restaurantId: number,

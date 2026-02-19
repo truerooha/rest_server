@@ -58,10 +58,14 @@ const logApiError = (res: Response, message: string, error: unknown): void => {
   logger.error(message, { requestId: getRequestId(res), error })
 }
 
+export interface ApiServerOptions {
+  notifyLobbyActivated?: (telegramUserId: number, slotTime: string) => Promise<void>
+}
+
 /**
  * Создаёт Express API сервер
  */
-export function createApiServer(db: Database.Database): Express {
+export function createApiServer(db: Database.Database, options?: ApiServerOptions): Express {
   const app = express()
 
   // Middleware
@@ -329,6 +333,24 @@ export function createApiServer(db: Database.Database): Express {
         orderDate,
         user.id,
       )
+
+      const minParticipants = ORDER_CONFIG.minLobbyParticipants ?? 1
+      const count = context.repos.lobby.countReservations(building_id, restaurant_id, delivery_slot, orderDate)
+      if (count === minParticipants && options?.notifyLobbyActivated) {
+        const telegramIds = context.repos.lobby.getReservationTelegramIds(
+          building_id,
+          restaurant_id,
+          delivery_slot,
+          orderDate,
+        )
+        for (const id of telegramIds) {
+          if (id === telegram_user_id) continue
+          options.notifyLobbyActivated(id, delivery_slot).catch((err) => {
+            logger.error('Ошибка отправки уведомления об активации слота', { telegramUserId: id, error: err })
+          })
+        }
+      }
+
       res.json({ success: true })
     } catch (error) {
       logApiError(res, 'Error joining lobby', error)
