@@ -8,9 +8,13 @@ const MAX_AGE_SECONDS = 86400 // 24 часа (initData не обновляетс
 
 /**
  * Middleware: верифицирует Telegram initData из заголовка X-Telegram-Init-Data.
- * В non-production (dev/test) пропускает без проверки для совместимости с test-api.html и тестами.
- * В production: 401 если initData отсутствует или невалидна.
- * При успехе: res.locals.telegramUser = TelegramInitDataResult.
+ *
+ * Режимы работы:
+ * - non-production (dev/test): пропускает без проверки
+ * - production, REQUIRE_TELEGRAM_AUTH=true: strict — 401 без initData
+ * - production, REQUIRE_TELEGRAM_AUTH не задан: soft — верифицирует если есть, пропускает если нет
+ *
+ * При успешной верификации: res.locals.telegramUser = TelegramInitDataResult.
  */
 export function requireTelegramAuth(req: Request, res: Response, next: NextFunction): void {
   if (config.nodeEnv !== 'production') {
@@ -18,19 +22,30 @@ export function requireTelegramAuth(req: Request, res: Response, next: NextFunct
   }
 
   const initData = req.headers[HEADER_NAME]
+
+  // Нет заголовка → в strict-режиме блокируем, иначе пропускаем
   if (typeof initData !== 'string' || !initData) {
-    res.status(401).json({ success: false, error: 'missing_init_data' })
-    return
+    if (config.requireTelegramAuth) {
+      res.status(401).json({ success: false, error: 'missing_init_data' })
+      return
+    }
+    return next()
   }
 
+  // Заголовок есть, но нет токена для проверки
   if (!config.clientBotToken) {
     logger.error('CLIENT_BOT_TOKEN не настроен, невозможно проверить initData')
-    res.status(500).json({ success: false, error: 'server_config_error' })
-    return
+    // В soft-режиме пропускаем, в strict — 500
+    if (config.requireTelegramAuth) {
+      res.status(500).json({ success: false, error: 'server_config_error' })
+      return
+    }
+    return next()
   }
 
   const result = verifyTelegramInitData(initData, config.clientBotToken, MAX_AGE_SECONDS)
   if (!result) {
+    logger.warn('Невалидный initData', { path: req.path })
     res.status(401).json({ success: false, error: 'invalid_init_data' })
     return
   }

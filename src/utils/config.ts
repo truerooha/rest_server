@@ -29,6 +29,8 @@ const envSchema = z.object({
   CLIENT_BOT_USERNAME: z.string().optional(),
   /** Short name Web App из BotFather для ссылки t.me/bot/app?startapp=CODE */
   WEB_APP_SHORT_NAME: z.string().optional(),
+  /** Включить strict-режим верификации Telegram initData (блокировать запросы без заголовка) */
+  REQUIRE_TELEGRAM_AUTH: z.string().optional(),
 })
 
 const parsedEnv = envSchema.safeParse(process.env)
@@ -81,6 +83,8 @@ export const config = {
   disablePlatformBot: parseBooleanFlag(env.DISABLE_PLATFORM_BOT),
   clientBotUsername: env.CLIENT_BOT_USERNAME?.trim() || null,
   webAppShortName: env.WEB_APP_SHORT_NAME?.trim() || null,
+  /** Strict-режим: блокировать запросы без X-Telegram-Init-Data. По умолчанию false (soft-режим). */
+  requireTelegramAuth: parseBooleanFlag(env.REQUIRE_TELEGRAM_AUTH),
 }
 
 // Внимание:
