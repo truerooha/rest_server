@@ -18,6 +18,7 @@ import { ORDER_CONFIG } from '../utils/order-config'
 import { logger } from '../utils/logger'
 import { config } from '../utils/config'
 import { getAppTimezoneId, getNowMinutesInAppTz, getTodayInAppTz } from '../utils/timezone'
+import { requireTelegramAuth, getTelegramUser } from './middleware/telegram-auth'
 
 export interface ApiContext {
   db: Database.Database
@@ -113,7 +114,7 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
         callback(new Error('Not allowed by CORS'))
       },
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Telegram-Init-Data'],
     }),
   )
   app.use(express.json())
@@ -137,13 +138,36 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
     },
   }
 
+  // Публичные пути, не требующие верификации initData
+  const PUBLIC_PATHS = new Set([
+    '/api/health',
+    '/api/config',
+    '/api/buildings',
+    '/api/restaurants',
+    '/api/delivery-slots',
+    '/api/init-default-data',
+  ])
+  const isPublicPath = (path: string): boolean =>
+    PUBLIC_PATHS.has(path) ||
+    path.startsWith('/api/buildings/') ||
+    path.startsWith('/api/restaurants/') ||
+    path.startsWith('/api/menu/')
+
+  // Верификация Telegram initData для защищённых эндпоинтов
+  app.use('/api', (req: Request, res: Response, next: NextFunction) => {
+    if (isPublicPath(req.path)) return next()
+    return requireTelegramAuth(req, res, next)
+  })
+
   /** Middleware: check that user is approved before write operations */
   const requireApprovedUser = (req: Request, res: Response, next: NextFunction) => {
     try {
+      // В production берём telegramUserId из верифицированного initData
+      const verifiedUser = getTelegramUser(res)
       const body = req.body as Record<string, unknown>
-      const telegramUserId =
-        body?.telegram_user_id ??
-        (req.query.telegram_user_id ? parseInt(String(req.query.telegram_user_id)) : null)
+      const telegramUserId = verifiedUser?.telegramUserId
+        ?? body?.telegram_user_id
+        ?? (req.query.telegram_user_id ? parseInt(String(req.query.telegram_user_id)) : null)
       const internalUserId = body?.user_id ?? body?.userId
 
       let user = null
@@ -165,6 +189,27 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
       next()
     } catch {
       next()
+    }
+  }
+
+  /** Middleware: только для restaurant admin (PATCH /api/orders/:id/status) */
+  const requireRestaurantAdmin = (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const verifiedUser = getTelegramUser(res)
+      const telegramUserId = verifiedUser?.telegramUserId
+        ?? (req.body?.telegram_user_id ? Number(req.body.telegram_user_id) : null)
+
+      if (!telegramUserId) {
+        return res.status(401).json({ success: false, error: 'unauthorized' })
+      }
+
+      if (!context.repos.restaurantAdmin.isAdmin(telegramUserId)) {
+        return res.status(403).json({ success: false, error: 'admin_only' })
+      }
+
+      next()
+    } catch {
+      return res.status(500).json({ success: false, error: 'auth_check_failed' })
     }
   }
 
@@ -1034,8 +1079,8 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
     }
   })
 
-  // PATCH /api/orders/:id/status - обновить статус заказа
-  app.patch('/api/orders/:id/status', (req: Request, res: Response) => {
+  // PATCH /api/orders/:id/status - обновить статус заказа (только для restaurant admin)
+  app.patch('/api/orders/:id/status', requireRestaurantAdmin, (req: Request, res: Response) => {
     try {
       const orderId = parseInt(String(req.params.id))
       const { status } = req.body

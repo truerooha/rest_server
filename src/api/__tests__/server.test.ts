@@ -5,6 +5,8 @@ import { applyMigrations } from '../../db/migrations/migrate'
 import { createApiServer } from '../server'
 import {
   BuildingRepository,
+  OrderRepository,
+  RestaurantAdminRepository,
   RestaurantBuildingRepository,
   RestaurantRepository,
   UserRepository,
@@ -273,6 +275,68 @@ describe('HTTP API server', () => {
     expect(res.status).toBe(404)
     expect(res.body.success).toBe(false)
     expect(res.body.error).toBe('invalid_invite_code')
+  })
+
+  // === PATCH /api/orders/:id/status — авторизация ===
+
+  it('PATCH /api/orders/:id/status возвращает 401 без telegram_user_id', async () => {
+    const app = createApp()
+
+    const res = await request(app)
+      .patch('/api/orders/1/status')
+      .send({ status: 'confirmed' })
+
+    expect(res.status).toBe(401)
+    expect(res.body.error).toBe('unauthorized')
+  })
+
+  it('PATCH /api/orders/:id/status возвращает 403 для не-админа', async () => {
+    const app = createApp()
+    const userRepo = new UserRepository(db)
+    userRepo.create({ telegram_user_id: 55555 })
+
+    const res = await request(app)
+      .patch('/api/orders/1/status')
+      .send({ status: 'confirmed', telegram_user_id: 55555 })
+
+    expect(res.status).toBe(403)
+    expect(res.body.error).toBe('admin_only')
+  })
+
+  it('PATCH /api/orders/:id/status успешен для restaurant admin', async () => {
+    const app = createApp()
+    const userRepo = new UserRepository(db)
+    const restaurantRepo = new RestaurantRepository(db)
+    const buildingRepo = new BuildingRepository(db)
+    const orderRepo = new OrderRepository(db)
+    const restaurantAdminRepo = new RestaurantAdminRepository(db)
+
+    const user = userRepo.create({ telegram_user_id: 44444 })
+    userRepo.approve(44444)
+    const restaurant = restaurantRepo.findOrCreateByChatId(33333, 'Кухня')
+    const building = buildingRepo.create({ name: 'Офис', address: 'Адрес' })
+
+    // Делаем пользователя 44444 админом ресторана
+    restaurantAdminRepo.grant(restaurant.id, 44444)
+
+    // Создаём заказ
+    const order = orderRepo.create({
+      user_id: user.id,
+      restaurant_id: restaurant.id,
+      building_id: building.id,
+      items: JSON.stringify([{ name: 'Борщ', price: 150, quantity: 1 }]),
+      total_price: 150,
+      delivery_slot: '12:00-13:00',
+      status: 'pending',
+    })
+
+    const res = await request(app)
+      .patch(`/api/orders/${order.id}/status`)
+      .send({ status: 'confirmed', telegram_user_id: 44444 })
+
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(res.body.data.status).toBe('confirmed')
   })
 
   // Тесты, связанные с системой кредитов/баллов, удалены: модель кредитов больше не используется.
