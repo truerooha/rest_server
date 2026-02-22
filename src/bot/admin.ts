@@ -110,12 +110,17 @@ export function createBot(
   const notifyUser = options?.notifyUser
 
   // Access control: only whitelisted restaurant admins can use the bot
+  // /start is allowed through so new restaurant owners can register
   bot.use(async (ctx, next) => {
     const chatId = ctx.from?.id
     if (!chatId) {
       return
     }
-    if (!restaurantAdminRepo.isAdmin(chatId)) {
+    // Allow /start and restaurant name input for new owners not yet in whitelist
+    const isStartCommand = ctx.message?.text?.startsWith('/start')
+    const hasNoRestaurant = !restaurantRepo.findByChatId(chatId)
+    const isRegistrationFlow = isStartCommand || (hasNoRestaurant && ctx.message?.text && !ctx.message.text.startsWith('/'))
+    if (!isRegistrationFlow && !restaurantAdminRepo.isAdmin(chatId)) {
       await ctx.reply('Доступ запрещён. Обратитесь к администратору платформы.')
       return
     }
@@ -2246,7 +2251,8 @@ export function createBot(
         return
       }
       awaitingRestaurantName.delete(chatId)
-      restaurantRepo.findOrCreateByChatId(chatId, name)
+      const restaurant = restaurantRepo.findOrCreateByChatId(chatId, name)
+      restaurantAdminRepo.grant(restaurant.id, chatId, 'owner')
       await ctx.reply(`✅ Ресторан «${name}» создан!\n\n` + getHelpText(), {
         parse_mode: 'Markdown',
         reply_markup: getMainKeyboard(),
