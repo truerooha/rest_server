@@ -1758,18 +1758,6 @@ export function createBot(
         }
       }
 
-      const finalItems = menuRepo.findByRestaurantId(restaurant.id)
-
-      // Группируем блюда по категориям для красивого вывода
-      const itemsByCategory = finalItems.reduce((acc, item) => {
-        const category = item.category || 'Другое'
-        if (!acc[category]) {
-          acc[category] = []
-        }
-        acc[category].push(item)
-        return acc
-      }, {} as Record<string, MenuItem[]>)
-
       // Формируем сообщение с результатом
       let message =
         `✅ Обновлено меню по фото.\n\n` +
@@ -1777,24 +1765,9 @@ export function createBot(
         `Добавлено новых блюд: ${createdCount}\n` +
         `Обновлено существующих: ${updatedCount}` +
         (priceChangedCount > 0 ? ` (цена изменена у ${priceChangedCount})` : '') +
-        `\n\n📋 Текущее меню:\n\n`
-      
-      // Выводим блюда по категориям
-      for (const [category, items] of Object.entries(itemsByCategory)) {
-        message += `**${category}**\n`
-        for (const item of items) {
-          const breakfastEmoji = item.is_breakfast ? '🌅 ' : ''
-          message += `${breakfastEmoji}• ${item.name} — ${item.price}₽\n`
-          if (item.description) {
-            message += `  _${item.description}_\n`
-          }
-        }
-        message += '\n'
-      }
-
-      message += 'Меню сохранено в базу данных! 🎉\n\n'
-      message += '💡 Можно отправлять следующие фото страниц меню — новые блюда добавятся, а существующие обновятся по названию.\n'
-      message += '📷 Используйте /photos чтобы добавить или заменить фотографии у позиций'
+        `\n\n💡 Можно отправлять следующие фото страниц меню — новые блюда добавятся, а существующие обновятся по названию.\n` +
+        `📋 /menu — посмотреть текущее меню\n` +
+        `📷 /photos — добавить или заменить фотографии у позиций`
 
       await ctx.reply(message, { parse_mode: 'Markdown' })
     } catch (error) {
