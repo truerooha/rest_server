@@ -33,6 +33,7 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^25.2.0",
+    "@types/sharp": "^0.31.1",
     "@types/supertest": "^6.0.3",
     "@vitest/ui": "^4.0.18",
     "supertest": "^7.2.2",
@@ -48,6 +49,7 @@
     "express": "^5.2.1",
     "grammy": "^1.39.3",
     "openai": "^6.17.0",
+    "sharp": "^0.34.5",
     "zod": "^4.3.6"
   }
 }

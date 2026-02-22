@@ -16,6 +16,7 @@ import type { MenuItem } from '../types'
 import Database from 'better-sqlite3'
 import fs from 'fs'
 import path from 'path'
+import sharp from 'sharp'
 import { config } from '../utils/config'
 
 export type AdminBotOptions = {
@@ -135,24 +136,40 @@ export function createBot(
   const pendingRenameCategories = new Map<number, string[]>() // chatId → список категорий для inline-кнопок
 
   /** Удаляет файл изображения блюда с диска, если он существует */
-  function deleteItemImage(imageUrl: string | undefined | null): void {
-    if (!imageUrl) return
+  function deleteFileByUrl(url: string | undefined | null): void {
+    if (!url) return
     try {
-      const filename = path.basename(imageUrl)
+      const filename = path.basename(url)
       const filepath = path.join(config.uploadsPath, filename)
       if (fs.existsSync(filepath)) {
         fs.unlinkSync(filepath)
       }
     } catch (err) {
-      logger.warn('Не удалось удалить файл изображения', { imageUrl, error: err })
+      logger.warn('Не удалось удалить файл изображения', { url, error: err })
     }
   }
 
-  /** Удаляет все файлы изображений для блюд ресторана */
+  function deleteItemImage(imageUrl: string | undefined | null): void {
+    deleteFileByUrl(imageUrl)
+  }
+
+  function deleteItemThumbnail(thumbnailUrl: string | undefined | null): void {
+    deleteFileByUrl(thumbnailUrl)
+  }
+
+  async function generateThumbnail(inputPath: string, outputPath: string): Promise<void> {
+    await sharp(inputPath)
+      .resize(400, 400, { fit: 'cover' })
+      .jpeg({ quality: 75 })
+      .toFile(outputPath)
+  }
+
+  /** Удаляет все файлы изображений и миниатюр для блюд ресторана */
   function deleteAllItemImages(restaurantId: number): void {
     const items = menuRepo.findByRestaurantId(restaurantId)
     for (const item of items) {
       deleteItemImage(item.image_url)
+      deleteItemThumbnail(item.thumbnail_url)
     }
   }
 
@@ -1196,7 +1213,8 @@ export function createBot(
         }
 
         deleteItemImage(item.image_url)
-        menuRepo.updateItem(itemId, { image_url: null })
+        deleteItemThumbnail(item.thumbnail_url)
+        menuRepo.updateItem(itemId, { image_url: null, thumbnail_url: null })
 
         await ctx.editMessageText(
           `✅ Фото удалено!\n\n` +
@@ -1658,16 +1676,18 @@ export function createBot(
         const buffer = Buffer.from(await response.arrayBuffer())
         fs.writeFileSync(filepath, buffer)
 
-        // Удаляем старый файл, если был
-        if (item.image_url) {
-          const oldPath = path.join(config.uploadsPath, path.basename(item.image_url))
-          if (fs.existsSync(oldPath)) {
-            try { fs.unlinkSync(oldPath) } catch { /* ignore */ }
-          }
-        }
+        // Генерируем миниатюру для сетки меню
+        const thumbFilename = `menu_${awaitedItemId}_${Date.now()}_thumb.jpg`
+        const thumbPath = path.join(uploadsDir, thumbFilename)
+        await generateThumbnail(filepath, thumbPath)
+
+        // Удаляем старые файлы, если были
+        deleteItemImage(item.image_url)
+        deleteItemThumbnail(item.thumbnail_url)
 
         const imageUrl = `/uploads/${filename}`
-        menuRepo.updateItem(awaitedItemId, { image_url: imageUrl })
+        const thumbnailUrl = `/uploads/${thumbFilename}`
+        menuRepo.updateItem(awaitedItemId, { image_url: imageUrl, thumbnail_url: thumbnailUrl })
 
         await ctx.reply(
           `✅ Фото для «${item.name}» сохранено!\n\n` +

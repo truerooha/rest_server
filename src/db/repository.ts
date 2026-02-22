@@ -168,6 +168,10 @@ export class MenuRepository {
       fields.push('image_url = ?')
       values.push(updates.image_url)
     }
+    if (updates.thumbnail_url !== undefined) {
+      fields.push('thumbnail_url = ?')
+      values.push(updates.thumbnail_url)
+    }
 
     if (fields.length === 0) return
 

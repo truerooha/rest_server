@@ -17,6 +17,7 @@ export interface MenuItem {
   description?: string
   category?: string
   image_url?: string | null
+  thumbnail_url?: string | null
   is_breakfast: boolean
   is_available: boolean
   created_at: string
