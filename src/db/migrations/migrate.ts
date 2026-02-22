@@ -132,6 +132,10 @@ export function ensureSchemaColumns(dbOrPath: Database.Database | string): void 
       logger.warn('Восстанавливаем колонку menu_items.image_url')
       db.exec('ALTER TABLE menu_items ADD COLUMN image_url TEXT')
     }
+    if (!hasColumn(db, 'menu_items', 'thumbnail_url')) {
+      logger.warn('Восстанавливаем колонку menu_items.thumbnail_url')
+      db.exec('ALTER TABLE menu_items ADD COLUMN thumbnail_url TEXT')
+    }
     if (!hasColumn(db, 'restaurants', 'min_order_amount')) {
       logger.warn('Восстанавливаем колонку restaurants.min_order_amount')
       db.exec('ALTER TABLE restaurants ADD COLUMN min_order_amount REAL DEFAULT 0')
