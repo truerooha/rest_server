@@ -112,6 +112,15 @@ export function createBot(
   const adminInviteRepo = new RestaurantAdminInviteRepository(db)
   const notifyUser = options?.notifyUser
 
+  /** Находит ресторан по chatId: сначала как владелец (chat_id), затем через restaurant_admins */
+  function findRestaurantForAdmin(chatId: number): ReturnType<RestaurantRepository['findByChatId']> {
+    const byChat = restaurantRepo.findByChatId(chatId)
+    if (byChat) return byChat
+    const admins = restaurantAdminRepo.findByTelegramId(chatId)
+    if (admins.length === 0) return undefined
+    return restaurantRepo.findById(admins[0].restaurant_id)
+  }
+
   // Access control: only whitelisted restaurant admins can use the bot
   // /start is allowed through so new restaurant owners can register
   bot.use(async (ctx, next) => {
@@ -121,7 +130,7 @@ export function createBot(
     }
     // Allow /start (including invite deep links) and restaurant name input for new owners not yet in whitelist
     const isStartCommand = ctx.message?.text?.startsWith('/start')
-    const hasNoRestaurant = !restaurantRepo.findByChatId(chatId)
+    const hasNoRestaurant = !findRestaurantForAdmin(chatId)
     const isRegistrationFlow = isStartCommand || (hasNoRestaurant && ctx.message?.text && !ctx.message.text.startsWith('/'))
     if (!isRegistrationFlow && !restaurantAdminRepo.isAdmin(chatId)) {
       await ctx.reply('Доступ запрещён. Обратитесь к администратору платформы.')
@@ -243,7 +252,7 @@ export function createBot(
   bot.hears('📋 Команды', async (ctx: Context) => {
     const chatId = ctx.chat?.id
     if (!chatId) return
-    const restaurant = restaurantRepo.findByChatId(chatId)
+    const restaurant = findRestaurantForAdmin(chatId)
     if (!restaurant) {
       await ctx.reply('❌ Ресторан не найден. Отправьте /start и укажите название ресторана.')
       return
@@ -284,7 +293,7 @@ export function createBot(
       return
     }
 
-    const restaurant = restaurantRepo.findByChatId(chatId)
+    const restaurant = findRestaurantForAdmin(chatId)
     if (restaurant) {
       await safeReplyHelp(ctx, { withKeyboard: true })
       return
@@ -301,7 +310,7 @@ export function createBot(
   bot.command('help', async (ctx: Context) => {
     const chatId = ctx.chat?.id
     if (!chatId) return
-    const restaurant = restaurantRepo.findByChatId(chatId)
+    const restaurant = findRestaurantForAdmin(chatId)
     if (!restaurant) {
       await ctx.reply('❌ Ресторан не найден. Отправьте /start и укажите название ресторана.')
       return
@@ -313,7 +322,7 @@ export function createBot(
   bot.command('invite', async (ctx: Context) => {
     const chatId = ctx.chat?.id
     if (!chatId) return
-    const restaurant = restaurantRepo.findByChatId(chatId)
+    const restaurant = findRestaurantForAdmin(chatId)
     if (!restaurant) {
       await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
       return
@@ -335,7 +344,7 @@ export function createBot(
       await ctx.reply('❌ Не удалось определить chat ID')
       return
     }
-    const restaurant = restaurantRepo.findByChatId(chatId)
+    const restaurant = findRestaurantForAdmin(chatId)
     if (!restaurant) {
       await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
       return
@@ -427,7 +436,7 @@ export function createBot(
       await ctx.answerCallbackQuery()
       return
     }
-    const restaurant = restaurantRepo.findByChatId(chatId)
+    const restaurant = findRestaurantForAdmin(chatId)
     if (!restaurant) {
       await ctx.answerCallbackQuery({ text: 'Ресторан не найден' })
       return
@@ -550,7 +559,7 @@ export function createBot(
       await ctx.answerCallbackQuery()
       return
     }
-    const restaurant = restaurantRepo.findByChatId(chatId)
+    const restaurant = findRestaurantForAdmin(chatId)
     if (!restaurant) {
       await ctx.answerCallbackQuery({ text: 'Ресторан не найден' })
       return
@@ -628,7 +637,7 @@ export function createBot(
       return
     }
 
-    const restaurant = restaurantRepo.findByChatId(chatId)
+    const restaurant = findRestaurantForAdmin(chatId)
     if (!restaurant) {
       await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
       return
@@ -684,7 +693,7 @@ export function createBot(
       return
     }
 
-    const restaurant = restaurantRepo.findByChatId(chatId)
+    const restaurant = findRestaurantForAdmin(chatId)
     if (!restaurant) {
       await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
       return
@@ -733,7 +742,7 @@ export function createBot(
       return
     }
 
-    const restaurant = restaurantRepo.findByChatId(chatId)
+    const restaurant = findRestaurantForAdmin(chatId)
     if (!restaurant) {
       await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
       return
@@ -773,7 +782,7 @@ export function createBot(
       return
     }
 
-    const restaurant = restaurantRepo.findByChatId(chatId)
+    const restaurant = findRestaurantForAdmin(chatId)
     if (!restaurant) {
       await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
       return
@@ -1008,7 +1017,7 @@ export function createBot(
         const chatId = ctx.chat?.id
         if (!chatId) return
 
-        const restaurant = restaurantRepo.findByChatId(chatId)
+        const restaurant = findRestaurantForAdmin(chatId)
         if (!restaurant) {
           await ctx.answerCallbackQuery('Ресторан не найден')
           return
@@ -1218,7 +1227,7 @@ export function createBot(
         if (suffix.startsWith('pg:')) {
           const page = parseInt(suffix.replace('pg:', ''), 10)
           const categories = pendingRenameCategories.get(chatId)
-          const restaurant = restaurantRepo.findByChatId(chatId)
+          const restaurant = findRestaurantForAdmin(chatId)
           if (!categories || !restaurant || isNaN(page) || page < 0) {
             await ctx.answerCallbackQuery('Сессия истекла. Отправьте /rename_category заново.')
             return
@@ -1240,7 +1249,7 @@ export function createBot(
         awaitingRenameCategory.set(chatId, { oldCategory })
         pendingRenameCategories.delete(chatId)
 
-        const restaurant = restaurantRepo.findByChatId(chatId)
+        const restaurant = findRestaurantForAdmin(chatId)
         const count = restaurant ? menuRepo.findByCategoryAndRestaurantId(oldCategory, restaurant.id).length : 0
 
         await ctx.editMessageText(
@@ -1306,7 +1315,7 @@ export function createBot(
         const chatId = ctx.chat?.id
         if (!chatId) return
 
-        const restaurant = restaurantRepo.findByChatId(chatId)
+        const restaurant = findRestaurantForAdmin(chatId)
         if (!restaurant) {
           await ctx.answerCallbackQuery('Ресторан не найден')
           return
@@ -1346,7 +1355,7 @@ export function createBot(
             ? ctx.callbackQuery.message.chat.id
             : ctx.chat?.id
 
-        const restaurant = chatIdForCallback ? restaurantRepo.findByChatId(chatIdForCallback) : null
+        const restaurant = chatIdForCallback ? findRestaurantForAdmin(chatIdForCallback) : null
         if (!restaurant) {
           await ctx.editMessageText('❌ Ресторан не найден. Возможно, он уже удалён.')
           await ctx.answerCallbackQuery('Ресторан не найден')
@@ -1685,7 +1694,7 @@ export function createBot(
     const chatId = ctx.chat?.id
     if (!chatId) return
 
-    const restaurant = restaurantRepo.findByChatId(chatId)
+    const restaurant = findRestaurantForAdmin(chatId)
     if (!restaurant) {
       await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
       return
@@ -1828,7 +1837,7 @@ export function createBot(
       // Обогащаем данные категориями и признаком завтрака
       const enrichedItems = visionService.enrichMenuItems(result.items)
 
-      const restaurant = restaurantRepo.findByChatId(chatId)
+      const restaurant = findRestaurantForAdmin(chatId)
       if (!restaurant) {
         await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
         return
@@ -1918,7 +1927,7 @@ export function createBot(
       
       logger.debug('Команда /menu: chatId', { chatId })
 
-      const restaurant = restaurantRepo.findByChatId(chatId)
+      const restaurant = findRestaurantForAdmin(chatId)
       if (!restaurant) {
         logger.warn('Ресторан не найден для /menu', { chatId })
         await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
@@ -1995,7 +2004,7 @@ export function createBot(
         return
       }
 
-      const restaurant = restaurantRepo.findByChatId(chatId)
+      const restaurant = findRestaurantForAdmin(chatId)
       if (!restaurant) {
         await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
         return
@@ -2079,7 +2088,7 @@ export function createBot(
       const chatId = ctx.chat?.id
       if (!chatId) return
 
-      const restaurant = restaurantRepo.findByChatId(chatId)
+      const restaurant = findRestaurantForAdmin(chatId)
       if (!restaurant) {
         await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
         return
@@ -2113,7 +2122,7 @@ export function createBot(
         return
       }
 
-      const restaurant = restaurantRepo.findByChatId(chatId)
+      const restaurant = findRestaurantForAdmin(chatId)
       if (!restaurant) {
         await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
         return
@@ -2227,7 +2236,7 @@ export function createBot(
         return
       }
 
-      const currentRestaurant = restaurantRepo.findByChatId(chatId)
+      const currentRestaurant = findRestaurantForAdmin(chatId)
 
       let message = '🧪 <b>Рестораны в системе</b> (тестовый режим)\n\n'
       message += 'Используйте это меню только для отладки, например, чтобы удалить лишний ресторан.\n\n'
@@ -2268,7 +2277,7 @@ export function createBot(
     const chatId = ctx.chat?.id
     if (!chatId) return
 
-    const restaurant = restaurantRepo.findByChatId(chatId)
+    const restaurant = findRestaurantForAdmin(chatId)
     if (!restaurant) {
       await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
       return
@@ -2301,7 +2310,7 @@ export function createBot(
       return
     }
 
-    const restaurant = restaurantRepo.findByChatId(chatId)
+    const restaurant = findRestaurantForAdmin(chatId)
     if (!restaurant) {
       await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
       return
@@ -2367,7 +2376,7 @@ export function createBot(
         return
       }
       awaitingSbpLink.delete(chatId)
-      const restaurant = restaurantRepo.findByChatId(chatId)
+      const restaurant = findRestaurantForAdmin(chatId)
       if (!restaurant) {
         await ctx.reply('❌ Ресторан не найден.')
         return
@@ -2390,7 +2399,7 @@ export function createBot(
         return
       }
       awaitingRenameCategory.delete(chatId)
-      const restaurant = restaurantRepo.findByChatId(chatId)
+      const restaurant = findRestaurantForAdmin(chatId)
       if (!restaurant) {
         await ctx.reply('❌ Ресторан не найден.')
         return
