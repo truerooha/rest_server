@@ -705,21 +705,16 @@ export function createBot(
       return acc
     }, {} as Record<string, typeof items>)
 
-    let message = '✏️ **Редактирование блюда**\n\nВыберите блюдо для редактирования:\n\n'
-
     const keyboard = new InlineKeyboard()
 
     for (const [category, categoryItems] of Object.entries(itemsByCategory)) {
-      message += `**${category}:**\n`
+      keyboard.text(`— ${category} —`, 'noop').row()
       for (const item of categoryItems) {
-        message += `• ${item.name} — ${item.price}₽\n`
-        keyboard.text(`✏️ ${item.name}`, `edit_select:${item.id}`).row()
+        keyboard.text(`✏️ ${item.name} — ${item.price}₽`, `edit_select:${item.id}`).row()
       }
-      message += '\n'
     }
 
-    await ctx.reply(message, {
-      parse_mode: 'Markdown',
+    await ctx.reply('✏️ Выберите блюдо для редактирования:', {
       reply_markup: keyboard,
     })
   })
