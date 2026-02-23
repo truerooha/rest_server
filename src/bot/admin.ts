@@ -144,6 +144,8 @@ export function createBot(
   const awaitingPhotoForItem = new Map<number, number>() // chatId → menuItemId
   const awaitingSbpLink = new Set<number>() // chatId
   const awaitingRenameCategory = new Map<number, { oldCategory: string }>()
+  const awaitingDangerPassword = new Map<number, 'clearall' | 'wipe_orders' | 'wipeall'>()
+  const DANGER_PASSWORD = '111111'
   const pendingRenameCategories = new Map<number, string[]>() // chatId → список категорий для inline-кнопок
 
   /** Удаляет файл изображения блюда с диска, если он существует */
@@ -212,11 +214,7 @@ export function createBot(
       `/photos - добавить фотографии к блюдам\n\n` +
       `**Настройки:**\n` +
       `/payment - ссылка для оплаты по СБП\n` +
-      `/invite - пригласить нового админа\n\n` +
-      `**Опасная зона:**\n` +
-      `/clearall - удалить все данные вашего ресторана\n` +
-      `/wipe_orders - [ТЕСТ] удалить все заказы в системе\n` +
-      `/wipeall - [ТЕСТ] удалить ВСЁ в базе`
+      `/invite - пригласить нового админа`
     )
   }
 
@@ -238,8 +236,7 @@ export function createBot(
           '/orders — заказы\n' +
           '/menu — меню\n' +
           '/add, /edit, /delete, /stoplist, /photos — управление меню\n' +
-          '/payment — ссылка для оплаты по СБП\n' +
-          '/clearall, /wipe_orders, /wipeall — опасные тестовые команды',
+          '/payment — ссылка для оплаты по СБП',
       )
     }
   }
@@ -677,6 +674,9 @@ export function createBot(
       awaitingRenameCategory.delete(chatId)
       pendingRenameCategories.delete(chatId)
       await ctx.reply('❌ Переименование категории отменено')
+    } else if (awaitingDangerPassword.has(chatId)) {
+      awaitingDangerPassword.delete(chatId)
+      await ctx.reply('❌ Операция отменена')
     } else if (userStates.has(chatId)) {
       userStates.delete(chatId)
       await ctx.reply('❌ Операция отменена')
@@ -2165,18 +2165,12 @@ export function createBot(
     const chatId = ctx.chat?.id
     if (!chatId) return
 
-    const keyboard = new InlineKeyboard()
-      .text('⚠️ ДА, УДАЛИТЬ ВСЕ ЗАКАЗЫ', 'confirm_wipe_orders')
-      .text('❌ Отмена', 'cancel_wipe_orders')
-
+    awaitingDangerPassword.set(chatId, 'wipe_orders')
     await ctx.reply(
       '🚨 <b>[ТЕСТ] ОПАСНО!</b>\n\n' +
-      'Удалить ВСЕ заказы в системе:\n' +
-      '• Индивидуальные заказы\n' +
-      '• Заказы всех ресторанов и слотов\n\n' +
-      'ℹ️ Балансы и транзакции кредитов затронуты не будут.\n\n' +
-      '⚠️ <b>Использовать только в тестовой среде!</b>',
-      { parse_mode: 'HTML', reply_markup: keyboard }
+      'Удалить ВСЕ заказы в системе.\n\n' +
+      '🔑 Введите пароль для подтверждения или /cancel для отмены.',
+      { parse_mode: 'HTML' }
     )
   })
 
@@ -2185,18 +2179,12 @@ export function createBot(
     const chatId = ctx.chat?.id
     if (!chatId) return
 
-    const keyboard = new InlineKeyboard()
-      .text('⚠️ ДА, УДАЛИТЬ ВСЁ', 'confirm_wipeall')
-      .text('❌ Отмена', 'cancel_wipeall')
-
+    awaitingDangerPassword.set(chatId, 'wipeall')
     await ctx.reply(
       '🚨 <b>[ТЕСТ] ОПАСНО!</b>\n\n' +
-      'Удалить ВСЕ данные в базе:\n' +
-      '• Все рестораны, меню, заказы\n' +
-      '• Всех пользователей, здания\n' +
-      '• Кредиты, черновики\n\n' +
-      '⚠️ <b>Необратимо!</b>',
-      { parse_mode: 'HTML', reply_markup: keyboard }
+      'Удалить ВСЕ данные в базе.\n\n' +
+      '🔑 Введите пароль для подтверждения или /cancel для отмены.',
+      { parse_mode: 'HTML' }
     )
   })
 
@@ -2316,24 +2304,12 @@ export function createBot(
       return
     }
 
-    const keyboard = new InlineKeyboard()
-      .text('⚠️ ДА, УДАЛИТЬ', 'confirm_clearall')
-      .text('❌ Отмена', 'cancel_clearall')
-
+    awaitingDangerPassword.set(chatId, 'clearall')
     await ctx.reply(
       `🚨 <b>ВНИМАНИЕ!</b>\n\n` +
-      `Вы собираетесь удалить все данные ресторана «${restaurant.name}»:\n` +
-      '• Все блюда из меню\n' +
-      '• Все заказы\n' +
-      '• Связи со зданиями\n' +
-      '• Черновики заказов клиентов\n\n' +
-      '⚠️ <b>Это действие НЕОБРАТИМО!</b>\n\n' +
-      'Данные других ресторанов не затрагиваются.\n\n' +
-      'Вы уверены?',
-      {
-        parse_mode: 'HTML',
-        reply_markup: keyboard,
-      }
+      `Вы собираетесь удалить все данные ресторана «${restaurant.name}».\n\n` +
+      '🔑 Введите пароль для подтверждения или /cancel для отмены.',
+      { parse_mode: 'HTML' }
     )
   })
 
@@ -2412,6 +2388,67 @@ export function createBot(
           `/menu - посмотреть меню\n` +
           `/categories - статистика по категориям`
       )
+      return
+    }
+
+    // Ожидание пароля для опасных команд
+    const dangerAction = awaitingDangerPassword.get(chatId)
+    if (dangerAction) {
+      if (text.trim() !== DANGER_PASSWORD) {
+        awaitingDangerPassword.delete(chatId)
+        await ctx.reply('❌ Неверный пароль. Операция отменена.')
+        return
+      }
+      awaitingDangerPassword.delete(chatId)
+
+      if (dangerAction === 'clearall') {
+        const restaurant = findRestaurantForAdmin(chatId)
+        if (!restaurant) {
+          await ctx.reply('❌ Ресторан не найден.')
+          return
+        }
+        const keyboard = new InlineKeyboard()
+          .text('⚠️ ДА, УДАЛИТЬ', 'confirm_clearall')
+          .text('❌ Отмена', 'cancel_clearall')
+        await ctx.reply(
+          `🚨 <b>ВНИМАНИЕ!</b>\n\n` +
+          `Вы собираетесь удалить все данные ресторана «${restaurant.name}»:\n` +
+          '• Все блюда из меню\n' +
+          '• Все заказы\n' +
+          '• Связи со зданиями\n' +
+          '• Черновики заказов клиентов\n\n' +
+          '⚠️ <b>Это действие НЕОБРАТИМО!</b>\n\n' +
+          'Данные других ресторанов не затрагиваются.\n\n' +
+          'Вы уверены?',
+          { parse_mode: 'HTML', reply_markup: keyboard }
+        )
+      } else if (dangerAction === 'wipe_orders') {
+        const keyboard = new InlineKeyboard()
+          .text('⚠️ ДА, УДАЛИТЬ ВСЕ ЗАКАЗЫ', 'confirm_wipe_orders')
+          .text('❌ Отмена', 'cancel_wipe_orders')
+        await ctx.reply(
+          '🚨 <b>[ТЕСТ] ОПАСНО!</b>\n\n' +
+          'Удалить ВСЕ заказы в системе:\n' +
+          '• Индивидуальные заказы\n' +
+          '• Заказы всех ресторанов и слотов\n\n' +
+          'ℹ️ Балансы и транзакции кредитов затронуты не будут.\n\n' +
+          '⚠️ <b>Использовать только в тестовой среде!</b>',
+          { parse_mode: 'HTML', reply_markup: keyboard }
+        )
+      } else if (dangerAction === 'wipeall') {
+        const keyboard = new InlineKeyboard()
+          .text('⚠️ ДА, УДАЛИТЬ ВСЁ', 'confirm_wipeall')
+          .text('❌ Отмена', 'cancel_wipeall')
+        await ctx.reply(
+          '🚨 <b>[ТЕСТ] ОПАСНО!</b>\n\n' +
+          'Удалить ВСЕ данные в базе:\n' +
+          '• Все рестораны, меню, заказы\n' +
+          '• Всех пользователей, здания\n' +
+          '• Кредиты, черновики\n\n' +
+          '⚠️ <b>Необратимо!</b>',
+          { parse_mode: 'HTML', reply_markup: keyboard }
+        )
+      }
       return
     }
 
