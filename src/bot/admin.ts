@@ -696,25 +696,21 @@ export function createBot(
     }
 
     // Группируем по категориям
-    const itemsByCategory = items.reduce((acc, item) => {
+    const categories = items.reduce((acc, item) => {
       const category = item.category || 'Другое'
       if (!acc[category]) {
-        acc[category] = []
+        acc[category] = 0
       }
-      acc[category].push(item)
+      acc[category]++
       return acc
-    }, {} as Record<string, typeof items>)
+    }, {} as Record<string, number>)
 
     const keyboard = new InlineKeyboard()
-
-    for (const [category, categoryItems] of Object.entries(itemsByCategory)) {
-      keyboard.text(`— ${category} —`, 'noop').row()
-      for (const item of categoryItems) {
-        keyboard.text(`✏️ ${item.name} — ${item.price}₽`, `edit_select:${item.id}`).row()
-      }
+    for (const [category, count] of Object.entries(categories)) {
+      keyboard.text(`${category} (${count})`, `edit_cat:${category}`).row()
     }
 
-    await ctx.reply('✏️ Выберите блюдо для редактирования:', {
+    await ctx.reply('✏️ Выберите категорию:', {
       reply_markup: keyboard,
     })
   })
@@ -956,6 +952,39 @@ export function createBot(
         await ctx.answerCallbackQuery('Блюдо показано')
       }
       
+      // Выбор категории для редактирования — показываем блюда
+      else if (data.startsWith('edit_cat:')) {
+        const category = data.replace('edit_cat:', '')
+        const chatId = ctx.chat?.id
+        if (!chatId) return
+
+        const restaurant = restaurantRepo.findByChatId(chatId)
+        if (!restaurant) {
+          await ctx.answerCallbackQuery('Ресторан не найден')
+          return
+        }
+
+        const items = menuRepo.findByRestaurantId(restaurant.id)
+        const categoryItems = items.filter(i => (i.category || 'Другое') === category)
+
+        if (categoryItems.length === 0) {
+          await ctx.answerCallbackQuery('В этой категории нет блюд')
+          return
+        }
+
+        const keyboard = new InlineKeyboard()
+        for (const item of categoryItems) {
+          keyboard.text(`✏️ ${item.name} — ${item.price}₽`, `edit_select:${item.id}`).row()
+        }
+        keyboard.text('◀️ Назад к категориям', 'edit_back_categories').row()
+
+        await ctx.editMessageText(`✏️ ${category}:`, {
+          reply_markup: keyboard,
+        })
+
+        await ctx.answerCallbackQuery()
+      }
+
       // Выбор блюда для редактирования
       else if (data.startsWith('edit_select:')) {
         const itemId = parseInt(data.replace('edit_select:', ''))
@@ -973,7 +1002,7 @@ export function createBot(
           .text('📄 Описание', `edit_field:${itemId}:description`).row()
           .text('🗂️ Категория', `edit_field:${itemId}:category`).row()
           .text(photoLabel, `edit_field:${itemId}:photo`).row()
-          .text('❌ Отмена', 'cancel_edit')
+          .text('◀️ Назад', `edit_cat:${item.category || 'Другое'}`).text('❌ Отмена', 'cancel_edit')
 
         const photoStatus = item.image_url ? '📷 Фото: ✅ есть' : '📷 Фото: нет'
 
@@ -1223,6 +1252,38 @@ export function createBot(
       }
       
       // Отмена редактирования
+      else if (data === 'edit_back_categories') {
+        const chatId = ctx.chat?.id
+        if (!chatId) return
+
+        const restaurant = restaurantRepo.findByChatId(chatId)
+        if (!restaurant) {
+          await ctx.answerCallbackQuery('Ресторан не найден')
+          return
+        }
+
+        const items = menuRepo.findByRestaurantId(restaurant.id)
+        const categories = items.reduce((acc, item) => {
+          const category = item.category || 'Другое'
+          if (!acc[category]) {
+            acc[category] = 0
+          }
+          acc[category]++
+          return acc
+        }, {} as Record<string, number>)
+
+        const keyboard = new InlineKeyboard()
+        for (const [category, count] of Object.entries(categories)) {
+          keyboard.text(`${category} (${count})`, `edit_cat:${category}`).row()
+        }
+
+        await ctx.editMessageText('✏️ Выберите категорию:', {
+          reply_markup: keyboard,
+        })
+
+        await ctx.answerCallbackQuery()
+      }
+
       else if (data === 'cancel_edit') {
         await ctx.editMessageText('❌ Редактирование отменено')
         await ctx.answerCallbackQuery('Отменено')
