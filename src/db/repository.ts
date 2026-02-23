@@ -12,6 +12,7 @@ import {
   GroupOrderStatus,
   RestaurantAdmin,
   RestaurantAdminRole,
+  RestaurantAdminInvite,
 } from '../types'
 import { generateInviteCode } from './migrations/migrate'
 import { getTodayInAppTz } from '../utils/timezone'
@@ -440,6 +441,40 @@ export class RestaurantAdminRepository {
       .prepare('DELETE FROM restaurant_admins WHERE restaurant_id = ? AND telegram_user_id = ?')
       .run(restaurantId, telegramUserId)
     return result.changes > 0
+  }
+}
+
+export class RestaurantAdminInviteRepository {
+  constructor(private db: Database.Database) {}
+
+  create(restaurantId: number, createdByTelegramId: number): RestaurantAdminInvite {
+    let code: string
+    do {
+      code = generateInviteCode()
+    } while (this.db.prepare('SELECT 1 FROM restaurant_admin_invites WHERE code = ?').get(code))
+
+    this.db
+      .prepare(
+        `INSERT INTO restaurant_admin_invites (restaurant_id, code, created_by_telegram_id)
+         VALUES (?, ?, ?)`,
+      )
+      .run(restaurantId, code, createdByTelegramId)
+
+    return this.db
+      .prepare('SELECT * FROM restaurant_admin_invites WHERE code = ?')
+      .get(code) as RestaurantAdminInvite
+  }
+
+  findByCode(code: string): RestaurantAdminInvite | undefined {
+    return this.db
+      .prepare('SELECT * FROM restaurant_admin_invites WHERE code = ? AND used_by_telegram_id IS NULL')
+      .get(code.toUpperCase()) as RestaurantAdminInvite | undefined
+  }
+
+  markUsed(code: string, usedByTelegramId: number): void {
+    this.db
+      .prepare('UPDATE restaurant_admin_invites SET used_by_telegram_id = ?, used_at = CURRENT_TIMESTAMP WHERE code = ?')
+      .run(usedByTelegramId, code.toUpperCase())
   }
 }
 

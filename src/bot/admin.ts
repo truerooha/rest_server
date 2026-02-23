@@ -7,6 +7,7 @@ import {
   GroupOrderRepository,
   BuildingRepository,
   RestaurantAdminRepository,
+  RestaurantAdminInviteRepository,
 } from '../db/repository'
 import { DraftRepository } from '../db/repository-drafts'
 import { VisionService } from '../services/vision'
@@ -108,6 +109,7 @@ export function createBot(
   const groupOrderRepo = new GroupOrderRepository(db)
   const buildingRepo = new BuildingRepository(db)
   const restaurantAdminRepo = new RestaurantAdminRepository(db)
+  const adminInviteRepo = new RestaurantAdminInviteRepository(db)
   const notifyUser = options?.notifyUser
 
   // Access control: only whitelisted restaurant admins can use the bot
@@ -117,7 +119,7 @@ export function createBot(
     if (!chatId) {
       return
     }
-    // Allow /start and restaurant name input for new owners not yet in whitelist
+    // Allow /start (including invite deep links) and restaurant name input for new owners not yet in whitelist
     const isStartCommand = ctx.message?.text?.startsWith('/start')
     const hasNoRestaurant = !restaurantRepo.findByChatId(chatId)
     const isRegistrationFlow = isStartCommand || (hasNoRestaurant && ctx.message?.text && !ctx.message.text.startsWith('/'))
@@ -200,7 +202,8 @@ export function createBot(
       `/rename_category - переименовать категорию (для всех блюд)\n` +
       `/photos - добавить фотографии к блюдам\n\n` +
       `**Настройки:**\n` +
-      `/payment - ссылка для оплаты по СБП\n\n` +
+      `/payment - ссылка для оплаты по СБП\n` +
+      `/invite - пригласить нового админа\n\n` +
       `**Опасная зона:**\n` +
       `/clearall - удалить все данные вашего ресторана\n` +
       `/wipe_orders - [ТЕСТ] удалить все заказы в системе\n` +
@@ -248,10 +251,38 @@ export function createBot(
     await safeReplyHelp(ctx, { withKeyboard: true })
   })
 
-  // Команда /start — всегда показывает приветствие
+  // Команда /start — приветствие или обработка invite deep link
   bot.command('start', async (ctx: Context) => {
     const chatId = ctx.chat?.id
     if (!chatId) return
+
+    // Handle invite deep link: /start invite_CODE
+    const payload = (ctx as unknown as { match: string }).match
+    if (payload && typeof payload === 'string' && payload.startsWith('invite_')) {
+      const code = payload.slice('invite_'.length).toUpperCase()
+      const invite = adminInviteRepo.findByCode(code)
+      if (!invite) {
+        await ctx.reply('❌ Ссылка недействительна или уже была использована.')
+        return
+      }
+      const restaurant = restaurantRepo.findById(invite.restaurant_id)
+      if (!restaurant) {
+        await ctx.reply('❌ Ресторан не найден.')
+        return
+      }
+      // Check if already an admin
+      const existingAdmins = restaurantAdminRepo.findByTelegramId(chatId)
+      if (existingAdmins.some((a) => a.restaurant_id === invite.restaurant_id)) {
+        await ctx.reply(`Вы уже являетесь админом ресторана «${restaurant.name}».`)
+        return
+      }
+      restaurantAdminRepo.grant(invite.restaurant_id, chatId, 'admin', invite.created_by_telegram_id)
+      adminInviteRepo.markUsed(code, chatId)
+      await ctx.reply(
+        `✅ Вы добавлены как админ ресторана «${restaurant.name}»!\n\nОтправьте /help для списка команд.`
+      )
+      return
+    }
 
     const restaurant = restaurantRepo.findByChatId(chatId)
     if (restaurant) {
@@ -276,6 +307,25 @@ export function createBot(
       return
     }
     await safeReplyHelp(ctx, { withKeyboard: true })
+  })
+
+  // /invite — генерирует одноразовую ссылку для добавления нового админа
+  bot.command('invite', async (ctx: Context) => {
+    const chatId = ctx.chat?.id
+    if (!chatId) return
+    const restaurant = restaurantRepo.findByChatId(chatId)
+    if (!restaurant) {
+      await ctx.reply('❌ Ресторан не найден. Сначала отправьте /start и укажите название ресторана.')
+      return
+    }
+    const invite = adminInviteRepo.create(restaurant.id, chatId)
+    const botUsername = ctx.me.username
+    const link = `https://t.me/${botUsername}?start=invite_${invite.code}`
+    await ctx.reply(
+      `🔗 Ссылка для добавления админа в «${restaurant.name}»:\n\n` +
+      `${link}\n\n` +
+      `Ссылка одноразовая — после использования станет недействительной.`
+    )
   })
 
   // Команда /orders - список заказов: сначала групповые на подтверждении, затем индивидуальные

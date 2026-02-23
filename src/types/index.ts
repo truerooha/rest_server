@@ -96,6 +96,16 @@ export interface RestaurantAdmin {
   created_at: string
 }
 
+export interface RestaurantAdminInvite {
+  id: number
+  restaurant_id: number
+  code: string
+  created_by_telegram_id: number
+  used_by_telegram_id?: number
+  created_at: string
+  used_at?: string
+}
+
 export interface MenuRecognitionResult {
   items: Array<{
     name: string
