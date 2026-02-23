@@ -1,4 +1,4 @@
-import { Bot, Context } from 'grammy'
+import { Bot, Context, InlineKeyboard } from 'grammy'
 import Database from 'better-sqlite3'
 import {
   BuildingRepository,
@@ -6,11 +6,25 @@ import {
   RestaurantBuildingRepository,
   UserRepository,
   RestaurantAdminRepository,
+  OrderRepository,
 } from '../db/repository'
 import { logger } from '../utils/logger'
 
 function buildClientLinkWithCode(username: string, shortName: string, code: string): string {
   return `https://t.me/${username.replace(/^@/, '')}/${shortName}?startapp=${code}`
+}
+
+function formatOrderStatus(status: string): string {
+  const map: Record<string, string> = {
+    pending: '⏳ ожидает',
+    confirmed: '✅ подтверждён',
+    restaurant_confirmed: '👨‍🍳 принят рестораном',
+    preparing: '🍳 готовится',
+    ready: '📦 готов',
+    delivered: '✅ доставлен',
+    cancelled: '❌ отменён',
+  }
+  return map[status] ?? status
 }
 
 export function createPlatformBot(
@@ -28,6 +42,7 @@ export function createPlatformBot(
   const rbRepo = new RestaurantBuildingRepository(db)
   const userRepo = new UserRepository(db)
   const adminRepo = new RestaurantAdminRepository(db)
+  const orderRepo = new OrderRepository(db)
 
   // Track conversation states for /add_building
   const awaitingBuildingName = new Set<number>()
@@ -58,6 +73,9 @@ export function createPlatformBot(
       '/revoke <restaurant_id> <telegram_user_id> — забрать доступ',
       '/link <restaurant_id> <building_id> — привязать ресторан к зданию',
       '/unlink <restaurant_id> <building_id> — отвязать',
+      '',
+      '💰 Обороты:',
+      '/revenue — обороты по ресторану',
       '',
       '👥 Пользователи:',
       '/users — список пользователей',
@@ -258,6 +276,65 @@ export function createPlatformBot(
     }
     userRepo.block(telegramUserId)
     await ctx.reply(`❌ Пользователь ${user.first_name || telegramUserId} заблокирован`)
+  })
+
+  // /revenue — выбрать ресторан для просмотра оборотов
+  bot.command('revenue', async (ctx) => {
+    const rows = db.prepare('SELECT * FROM restaurants ORDER BY name').all() as Array<{
+      id: number
+      name: string
+    }>
+    if (rows.length === 0) {
+      await ctx.reply('Ресторанов пока нет.')
+      return
+    }
+    const keyboard = new InlineKeyboard()
+    for (const r of rows) {
+      keyboard.text(r.name, `revenue:${r.id}`).row()
+    }
+    await ctx.reply('Выберите ресторан:', { reply_markup: keyboard })
+  })
+
+  // Callback: revenue:<restaurant_id>
+  bot.callbackQuery(/^revenue:(\d+)$/, async (ctx) => {
+    const restaurantId = parseInt(ctx.match[1], 10)
+    const restaurant = restaurantRepo.findById(restaurantId)
+    if (!restaurant) {
+      await ctx.answerCallbackQuery({ text: 'Ресторан не найден' })
+      return
+    }
+
+    const orders = orderRepo.findByRestaurantId(restaurantId)
+    const activeOrders = orders.filter((o) => o.status !== 'cancelled')
+
+    if (activeOrders.length === 0) {
+      await ctx.answerCallbackQuery()
+      await ctx.reply(`📊 ${restaurant.name}\n\nЗаказов пока нет.`)
+      return
+    }
+
+    const totalRevenue = activeOrders.reduce((sum, o) => sum + o.total_price, 0)
+
+    const lines: string[] = [
+      `📊 Обороты: ${restaurant.name}`,
+      `Всего заказов: ${activeOrders.length}`,
+      `Общая сумма: ${totalRevenue} ₽`,
+      '',
+    ]
+
+    const recentOrders = activeOrders.slice(0, 20)
+    for (const order of recentOrders) {
+      const date = order.order_date ?? order.created_at.slice(0, 10)
+      const statusLabel = formatOrderStatus(order.status)
+      lines.push(`#${order.id} | ${date} | ${order.total_price} ₽ | ${statusLabel}`)
+    }
+
+    if (activeOrders.length > 20) {
+      lines.push(`\n... и ещё ${activeOrders.length - 20} заказов`)
+    }
+
+    await ctx.answerCallbackQuery()
+    await ctx.reply(lines.join('\n'))
   })
 
   // Handle text for /add_building conversation
