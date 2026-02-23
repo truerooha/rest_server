@@ -32,8 +32,25 @@ describe('detectCategory', () => {
 
   it('должен определять категорию "Горячие блюда"', () => {
     expect(detectCategory('Стейк рибай')).toBe(MENU_CATEGORIES.HOT_DISHES)
-    expect(detectCategory('Курица гриль')).toBe(MENU_CATEGORIES.HOT_DISHES)
-    expect(detectCategory('Рыба на пару')).toBe(MENU_CATEGORIES.HOT_DISHES)
+    expect(detectCategory('Курица запечённая')).toBe(MENU_CATEGORIES.HOT_DISHES)
+    expect(detectCategory('Говядина тушёная')).toBe(MENU_CATEGORIES.HOT_DISHES)
+  })
+
+  it('должен определять категорию "Рыбные блюда"', () => {
+    expect(detectCategory('Рыба на пару')).toBe(MENU_CATEGORIES.FISH)
+    expect(detectCategory('Лосось на гриле')).toBe(MENU_CATEGORIES.FISH)
+    expect(detectCategory('Форель запечённая')).toBe(MENU_CATEGORIES.FISH)
+  })
+
+  it('должен определять категорию "Блюда на гриле"', () => {
+    expect(detectCategory('Шашлык из баранины')).toBe(MENU_CATEGORIES.GRILL)
+    expect(detectCategory('Кебаб')).toBe(MENU_CATEGORIES.GRILL)
+  })
+
+  it('должен определять категорию "Напитки"', () => {
+    expect(detectCategory('Кофе латте')).toBe(MENU_CATEGORIES.DRINKS)
+    expect(detectCategory('Чай зелёный')).toBe(MENU_CATEGORIES.DRINKS)
+    expect(detectCategory('Лимонад')).toBe(MENU_CATEGORIES.DRINKS)
   })
 
   it('должен определять категорию "Десерты"', () => {
@@ -112,7 +129,16 @@ describe('isValidCategory', () => {
 
   it('должен отклонять невалидные категории', () => {
     expect(isValidCategory('Непонятная категория')).toBe(false)
-    expect(isValidCategory('Напитки')).toBe(false)
+    expect(isValidCategory('Что-то странное')).toBe(false)
     expect(isValidCategory('')).toBe(false)
+  })
+
+  it('должен принимать новые категории', () => {
+    expect(isValidCategory('Напитки')).toBe(true)
+    expect(isValidCategory('Блюда на гриле')).toBe(true)
+    expect(isValidCategory('Рыбные блюда')).toBe(true)
+    expect(isValidCategory('Гарниры')).toBe(true)
+    expect(isValidCategory('Сэндвичи')).toBe(true)
+    expect(isValidCategory('Роллы')).toBe(true)
   })
 })

@@ -18,6 +18,7 @@ import { ORDER_CONFIG } from '../utils/order-config'
 import { logger } from '../utils/logger'
 import { config } from '../utils/config'
 import { getAppTimezoneId, getNowMinutesInAppTz, getTodayInAppTz } from '../utils/timezone'
+import { getCategoryPriority } from '../db/constants'
 import { requireTelegramAuth, getTelegramUser } from './middleware/telegram-auth'
 
 export interface ApiContext {
@@ -579,7 +580,7 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
       const items = context.repos.menu.findAvailableByRestaurantId(restaurantId)
 
       // Группируем по категориям
-      const grouped = items.reduce((acc, item) => {
+      const unsortedGrouped = items.reduce((acc, item) => {
         const category = item.category || 'Другое'
         if (!acc[category]) {
           acc[category] = []
@@ -588,11 +589,19 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
         return acc
       }, {} as Record<string, typeof items>)
 
+      // Сортируем категории по приоритету (1 — основные, 2 — второстепенные, 3 — напитки/десерты)
+      const sortedEntries = Object.entries(unsortedGrouped).sort(
+        ([a], [b]) => getCategoryPriority(a) - getCategoryPriority(b)
+      )
+      const grouped = Object.fromEntries(sortedEntries)
+      const categories = sortedEntries.map(([cat]) => cat)
+
       res.json({
         success: true,
         data: {
           items,
           grouped,
+          categories,
         },
       })
     } catch (error) {

@@ -412,7 +412,7 @@ describe('MenuRepository', () => {
       expect(updated).toBe(2)
 
       const soups = menuRepo.findByCategoryAndRestaurantId('Супы', restaurantId)
-      expect(soups).toHaveLength(3)
+      expect(soups).toHaveLength(2)
       const oldCat = menuRepo.findByCategoryAndRestaurantId('Длинное название категории', restaurantId)
       expect(oldCat).toHaveLength(0)
     })
