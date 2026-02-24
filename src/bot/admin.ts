@@ -429,16 +429,28 @@ export function createBot(
       ctx.callbackQuery?.message && 'chat' in ctx.callbackQuery.message
         ? ctx.callbackQuery.message.chat.id
         : ctx.chat?.id
+    const fromId = ctx.from?.id
+    logger.info('group callback: start', { data, chatId, fromId, groupId, action })
     if (!chatId) {
+      logger.warn('group callback: no chatId', { fromId })
       await ctx.answerCallbackQuery()
       return
     }
     const restaurant = findRestaurantForAdmin(chatId)
     if (!restaurant) {
+      logger.warn('group callback: restaurant not found for admin', { chatId, fromId })
       await ctx.answerCallbackQuery({ text: 'Ресторан не найден' })
       return
     }
     const groupOrder = groupOrderRepo.findById(groupId)
+    logger.info('group callback: lookup result', {
+      groupId,
+      groupOrderExists: !!groupOrder,
+      groupOrderRestaurantId: groupOrder?.restaurant_id,
+      adminRestaurantId: restaurant.id,
+      chatId,
+      fromId,
+    })
     if (!groupOrder || groupOrder.restaurant_id !== restaurant.id) {
       await ctx.answerCallbackQuery({ text: 'Заказ не найден' })
       return
