@@ -69,10 +69,10 @@ export const config = {
   disableAdminBot: parseBooleanFlag(env.DISABLE_ADMIN_BOT),
   disableClientBot: parseBooleanFlag(env.DISABLE_CLIENT_BOT),
   disableMigrations: parseBooleanFlag(env.DISABLE_MIGRATIONS),
-  /** Минимум участников для активации слота и бесплатной доставки. По умолчанию 1 для тестирования. */
+  /** Минимум участников для активации слота и бесплатной доставки. */
   minLobbyParticipants: Math.max(
     1,
-    parseInt(env.MIN_LOBBY_PARTICIPANTS || '1', 10) || 1,
+    parseInt(env.MIN_LOBBY_PARTICIPANTS || '3', 10) || 3,
   ),
   /** Путь к директории загруженных изображений. Railway: /data/uploads, локально: ./uploads */
   uploadsPath: env.UPLOADS_PATH || './uploads',

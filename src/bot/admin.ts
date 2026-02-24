@@ -78,7 +78,7 @@ function escapeHtml(text: string): string {
 
 // Типы для управления состоянием диалогов
 type ConversationStep = 'name' | 'price' | 'description' | 'category'
-type EditField = 'name' | 'price' | 'description' | 'category' | 'photo'
+type EditField = 'name' | 'price' | 'description' | 'category' | 'photo' | 'price_per_100g'
 
 interface UserState {
   action: 'add' | 'edit'
@@ -1067,15 +1067,18 @@ export function createBot(
         }
 
         const photoLabel = item.image_url ? '📷 Фото ✅' : '📷 Фото'
+        const per100gLabel = item.price_per_100g ? '⚖️ За 100 г ✅' : '⚖️ За 100 г'
         const keyboard = new InlineKeyboard()
           .text('📝 Название', `edit_field:${itemId}:name`).row()
           .text('💰 Цена', `edit_field:${itemId}:price`).row()
           .text('📄 Описание', `edit_field:${itemId}:description`).row()
           .text('🗂️ Категория', `edit_field:${itemId}:category`).row()
           .text(photoLabel, `edit_field:${itemId}:photo`).row()
+          .text(per100gLabel, `edit_field:${itemId}:price_per_100g`).row()
           .text('◀️ Назад', `edit_cat:${item.category || 'Другое'}`).text('❌ Отмена', 'cancel_edit')
 
         const photoStatus = item.image_url ? '📷 Фото: ✅ есть' : '📷 Фото: нет'
+        const priceUnit = item.price_per_100g ? '⚖️ Цена: за 100 г' : '⚖️ Цена: за порцию'
 
         await ctx.editMessageText(
           `✏️ **Редактирование блюда**\n\n` +
@@ -1083,7 +1086,8 @@ export function createBot(
           `💰 ${item.price}₽\n` +
           `📄 ${item.description || '_нет описания_'}\n` +
           `🗂️ ${item.category || 'Без категории'}\n` +
-          `${photoStatus}\n\n` +
+          `${photoStatus}\n` +
+          `${priceUnit}\n\n` +
           `Что хотите изменить?`,
           {
             parse_mode: 'Markdown',
@@ -1106,7 +1110,46 @@ export function createBot(
           return
         }
 
-        if (field === 'photo') {
+        if (field === 'price_per_100g') {
+          const newValue = !item.price_per_100g
+          menuRepo.updateItem(itemId, { price_per_100g: newValue })
+
+          await ctx.answerCallbackQuery(
+            newValue ? '⚖️ Цена теперь за 100 г' : '🍽️ Цена теперь за порцию'
+          )
+
+          // Re-trigger edit_select to refresh the screen
+          const updatedItem = menuRepo.findById(itemId)!
+          const photoLabel = updatedItem.image_url ? '📷 Фото ✅' : '📷 Фото'
+          const per100gLabel = updatedItem.price_per_100g ? '⚖️ За 100 г ✅' : '⚖️ За 100 г'
+          const keyboard = new InlineKeyboard()
+            .text('📝 Название', `edit_field:${itemId}:name`).row()
+            .text('💰 Цена', `edit_field:${itemId}:price`).row()
+            .text('📄 Описание', `edit_field:${itemId}:description`).row()
+            .text('🗂️ Категория', `edit_field:${itemId}:category`).row()
+            .text(photoLabel, `edit_field:${itemId}:photo`).row()
+            .text(per100gLabel, `edit_field:${itemId}:price_per_100g`).row()
+            .text('◀️ Назад', `edit_cat:${updatedItem.category || 'Другое'}`).text('❌ Отмена', 'cancel_edit')
+
+          const photoStatus = updatedItem.image_url ? '📷 Фото: ✅ есть' : '📷 Фото: нет'
+          const priceUnit = updatedItem.price_per_100g ? '⚖️ Цена: за 100 г' : '⚖️ Цена: за порцию'
+
+          await ctx.editMessageText(
+            `✏️ **Редактирование блюда**\n\n` +
+            `📋 ${updatedItem.name}\n` +
+            `💰 ${updatedItem.price}₽\n` +
+            `📄 ${updatedItem.description || '_нет описания_'}\n` +
+            `🗂️ ${updatedItem.category || 'Без категории'}\n` +
+            `${photoStatus}\n` +
+            `${priceUnit}\n\n` +
+            `Что хотите изменить?`,
+            {
+              parse_mode: 'Markdown',
+              reply_markup: keyboard,
+            }
+          )
+          return
+        } else if (field === 'photo') {
           // Для фото — показываем варианты: загрузить новое, удалить текущее
           const keyboard = new InlineKeyboard()
             .text('📷 Загрузить новое фото', `edit_photo_upload:${itemId}`).row()

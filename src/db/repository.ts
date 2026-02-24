@@ -165,6 +165,10 @@ export class MenuRepository {
       fields.push('is_available = ?')
       values.push(updates.is_available ? 1 : 0)
     }
+    if (updates.price_per_100g !== undefined) {
+      fields.push('price_per_100g = ?')
+      values.push(updates.price_per_100g ? 1 : 0)
+    }
     if (updates.image_url !== undefined) {
       fields.push('image_url = ?')
       values.push(updates.image_url)

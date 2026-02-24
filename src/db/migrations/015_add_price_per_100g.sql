@@ -1,0 +1,1 @@
+ALTER TABLE menu_items ADD COLUMN price_per_100g INTEGER DEFAULT 0;

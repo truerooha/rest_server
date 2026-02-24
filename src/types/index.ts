@@ -20,6 +20,7 @@ export interface MenuItem {
   thumbnail_url?: string | null
   is_breakfast: boolean
   is_available: boolean
+  price_per_100g?: boolean
   created_at: string
 }
 
