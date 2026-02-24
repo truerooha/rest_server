@@ -5,6 +5,7 @@ import {
   RestaurantRepository,
   BuildingRepository,
   LobbyRepository,
+  RestaurantAdminRepository,
 } from '../db/repository'
 import { ORDER_CONFIG } from '../utils/order-config'
 import { logger } from '../utils/logger'
@@ -33,7 +34,7 @@ function isLobbyDeadlinePassed(slotId: string, nowMinutes: number): boolean {
 }
 
 export type SendGroupOrderFn = (params: {
-  restaurantChatId: number
+  adminChatIds: number[]
   restaurantName: string
   buildingName: string
   deliverySlot: string
@@ -68,6 +69,7 @@ export function startDeadlineScheduler(
   const restaurantRepo = new RestaurantRepository(db)
   const buildingRepo = new BuildingRepository(db)
   const lobbyRepo = new LobbyRepository(db)
+  const restaurantAdminRepo = new RestaurantAdminRepository(db)
 
   function processLobbyDeadlines(): void {
     const nowMinutes = getNowMinutesInAppTz()
@@ -156,9 +158,14 @@ export function startDeadlineScheduler(
           orderCount: orders.length,
         })
 
+        const admins = restaurantAdminRepo.findByRestaurantId(restaurant_id)
+        const adminChatIds = admins.length > 0
+          ? admins.map((a) => a.telegram_user_id)
+          : [restaurant.chat_id]
+
         try {
           await sendGroupOrder({
-            restaurantChatId: restaurant.chat_id,
+            adminChatIds,
             restaurantName: restaurant.name,
             buildingName: building.name,
             deliverySlot: slot.id,

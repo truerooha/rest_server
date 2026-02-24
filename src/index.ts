@@ -134,9 +134,11 @@ async function main() {
           ...params,
           orders: ordersWithNames,
         })
-        await adminBot.api.sendMessage(params.restaurantChatId, text, {
-          reply_markup: keyboard,
-        })
+        await Promise.allSettled(
+          params.adminChatIds.map((chatId) =>
+            adminBot.api.sendMessage(chatId, text, { reply_markup: keyboard }),
+          ),
+        )
       },
         60_000,
         notifyLobbyCancelled ?? undefined,
